@@ -1753,13 +1753,13 @@ public class T3Model: Module {
                     // Get unique tokens - filter to vocab size
                     let uniqueTokens = Array(Set(generatedTokens).filter { $0 < logitsFlat.shape[0] })
                     if !uniqueTokens.isEmpty {
-                        // Create index array for all tokens at once
+                        // Create index array for all tokens at once (GPU)
                         let tokenIndices = MLXArray(uniqueTokens.map { Int32($0) })
 
-                        // Get all logits for generated tokens at once
+                        // Get all logits for generated tokens at once (GPU)
                         let selectedLogits = logitsFlat[tokenIndices]
 
-                        // Apply penalty using MLX operations: if logit > 0, divide, else multiply
+                        // Apply penalty using MLX operations (GPU)
                         let penalty = MLXArray(repetitionPenalty)
                         let penalizedLogits = `where`(
                             selectedLogits .> 0,
@@ -1767,13 +1767,24 @@ public class T3Model: Module {
                             selectedLogits * penalty
                         )
 
-                        // Update logits (single array conversion instead of per-token)
-                        var logitsArray = logitsFlat.asArray(Float.self)
+                        // Convert penalized logits to CPU once
                         let penalizedArray = penalizedLogits.asArray(Float.self)
+
+                        // Build update arrays on CPU (single pass, no GPU sync per iteration)
+                        var updateMaskArray = [Float](repeating: 0.0, count: logitsFlat.shape[0])
+                        var penalizedFullArray = [Float](repeating: 0.0, count: logitsFlat.shape[0])
+
                         for (i, token) in uniqueTokens.enumerated() {
-                            logitsArray[token] = penalizedArray[i]
+                            updateMaskArray[token] = 1.0
+                            penalizedFullArray[token] = penalizedArray[i]
                         }
-                        logitsFlat = MLXArray(logitsArray)
+
+                        // Convert back to GPU once
+                        let updateMask = MLXArray(updateMaskArray)
+                        let penalizedFull = MLXArray(penalizedFullArray)
+
+                        // Apply update using where (GPU)
+                        logitsFlat = `where`(updateMask .== 1.0, penalizedFull, logitsFlat)
                     }
                 }
 
@@ -1799,7 +1810,6 @@ public class T3Model: Module {
 
                 // Get probabilities for filtering
                 let probs = softmax(scaledLogits, axis: -1)
-                eval(probs)
 
                 // Min-P filtering: mask tokens with prob < min_p * max_prob
                 let maxProb = probs.max()
@@ -1807,35 +1817,33 @@ public class T3Model: Module {
                 let minPMask = probs .< minPThreshold
                 var filteredLogits = which(minPMask, MLXArray(-Float.infinity), scaledLogits)
 
-                // Top-P (nucleus) filtering:
-                // Sort probs and get indices in descending order
+                // Top-P (nucleus) filtering - optimized to reduce GPU-CPU transfers
+                // Transfer probs to CPU once for sorting and cumsum (unavoidable for top-p)
                 let probsArray = probs.asArray(Float.self)
 
-                // Create (prob, index) pairs and sort descending by prob
+                // CPU: Create (index, prob) pairs and sort descending
                 var sortedPairs = probsArray.enumerated().map { ($0.offset, $0.element) }
-                sortedPairs.sort { $0.1 > $1.1 }  // Sort descending by probability
+                sortedPairs.sort { $0.1 > $1.1 }
 
-                // Find cumulative sum and cutoff
+                // CPU: Compute cumulative sum and build keep mask in single pass
                 var cumSum: Float = 0.0
-                var keepIndices = Set<Int>()
+                var keepMaskArray = [Float](repeating: 0.0, count: probsArray.count)
 
                 for (idx, prob) in sortedPairs {
                     cumSum += prob
-                    keepIndices.insert(idx)
+                    keepMaskArray[idx] = 1.0
                     if cumSum > topP {
-                        break  // Stop after crossing threshold (include the crossing token)
+                        break
                     }
                 }
 
-                // Apply top-p mask: mask out tokens not in keepIndices
-                var topPLogitsArray = filteredLogits.asArray(Float.self)
-                for i in 0..<topPLogitsArray.count {
-                    if !keepIndices.contains(i) && topPLogitsArray[i] > -1e30 {
-                        topPLogitsArray[i] = -Float.infinity
-                    }
-                }
-                filteredLogits = MLXArray(topPLogitsArray)
-                eval(filteredLogits)
+                // GPU: Convert mask back once and apply
+                let keepMask = MLXArray(keepMaskArray)
+                filteredLogits = `where`(
+                    keepMask .== 1.0,
+                    filteredLogits,
+                    MLXArray(-Float.infinity)
+                )
 
                 // Sample from the filtered distribution
                 // MLXRandom.categorical has issues with -inf values
