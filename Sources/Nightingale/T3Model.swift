@@ -1905,9 +1905,6 @@ public class T3Model: Module {
                 // - Force EOS on repetition/hallucination detection (prevents loops)
                 // ============================================
                 let capturedAttention = getCapturedAttentionWeights()
-                // Python only uses AlignmentStreamAnalyzer for multilingual models.
-                // However, Swift Q4 model can get stuck in repetition loops, so we use
-                // a simplified version that just detects token repetition as a fallback.
                 let analyzerEnabled = true
                 if analyzerEnabled && !capturedAttention.isEmpty {
                     let lastGeneratedToken = generatedTokens.last
@@ -1916,8 +1913,6 @@ public class T3Model: Module {
                         logits: logitsFlat,
                         nextToken: lastGeneratedToken
                     )
-                    eval(logitsFlat)
-
                     // Clear attention to free memory
                     clearCapturedAttention()
                 } else {

@@ -180,14 +180,11 @@ public class AlignmentStreamAnalyzer {
         }
 
         let A = alignment!
-        eval(A)  // Ensure computed
-
         let T = A.shape[0]  // Speech frames
 
         // Find current text position from attention peak
         // Use RAW (unmasked) attention for position tracking - the masking was causing issues
         let rawLastRow = chunkSlice[(chunkSlice.shape[0]-1)..<chunkSlice.shape[0], 0...]
-        eval(rawLastRow)
         let curTextPosn = Int(argMax(rawLastRow, axis: -1).item(Int32.self))
 
         // Detect discontinuity (jumping too far in text) - more lenient range
