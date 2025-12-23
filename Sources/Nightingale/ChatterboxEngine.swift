@@ -110,9 +110,8 @@ public actor ChatterboxEngine {
     public func loadModels(from bundle: Bundle = .main, modelsURL: URL? = nil) async throws {
         print("Loading Chatterbox models...")
 
-        // CRITICAL: Set aggressive memory limits for iOS
-        // iPhone 16 Pro has ~3.5GB safe limit (jetsam at ~4.5GB)
-        let cacheLimitMB = 256  // Increased for quantized model inference
+        // Set GPU cache limit (256MB is optimal for MLX)
+        let cacheLimitMB = 256
         GPU.set(cacheLimit: cacheLimitMB * 1024 * 1024)
         print("GPU cache limit set to \(cacheLimitMB)MB")
 
@@ -169,8 +168,7 @@ public actor ChatterboxEngine {
             print("Warning: rope_freqs_llama3.safetensors not found (will use default RoPE)")
         }
 
-        // Find and load T3 weights
-        var rawWeights: [String: MLXArray]? = nil
+        // Find T3 and S3Gen weight files
         var t3WeightsURL: URL? = nil
         for filename in t3WeightFiles {
             let url = modelDir.appendingPathComponent(filename)
@@ -180,44 +178,11 @@ public actor ChatterboxEngine {
             }
         }
 
-        if let t3URL = t3WeightsURL {
-            print("Loading T3 weights from \(t3URL.lastPathComponent)...")
-            rawWeights = try MLX.loadArrays(url: t3URL)
-            print("Loaded \(rawWeights!.count) weight arrays")
-
-            // Remap keys from Python naming to Swift naming for T3
-            let t3Weights = remapT3Keys(rawWeights!)
-            print("Remapped to \(t3Weights.count) T3 weights")
-
-            // Create T3Model with weights
-            print("Creating T3Model...")
-            self.t3 = T3Model(config: config, weights: t3Weights, ropeFreqsURL: ropeFreqsURL)
-        } else {
-            print("Warning: No T3 weights found (checked: \(t3WeightFiles.joined(separator: ", ")))")
-            // Fallback: create model without weights (random init)
-            self.t3 = T3Model(config: config)
-        }
-
-        // Verify embeddings loaded correctly (for both FP32 and Q4)
-        if let t3 = t3 {
-            eval(t3.textEmb.weight)
-            let min = t3.textEmb.weight.min().item(Float.self)
-            let max = t3.textEmb.weight.max().item(Float.self)
-            print("✅ textEmb.weight: min=\(min), max=\(max)")
-
-            if min == 0.0 && max == 0.0 {
-                print("⚠️ WARNING: Embeddings are zeros - weight loading may have failed!")
-            }
-        }
-
-        // S3Gen with weight loading
-        // Prefer s3gen.safetensors (raw PyTorch weights - same as Python uses)
-        // Fallback: s3gen_fp16.safetensors (pre-converted) or s3_engine.safetensors
+        // Find S3Gen weights
         let s3genPyTorchURL = modelDir.appendingPathComponent("s3gen.safetensors")
         let s3genFP16URL = modelDir.appendingPathComponent("s3gen_fp16.safetensors")
         let s3EngineURL = modelDir.appendingPathComponent("s3_engine.safetensors")
 
-        // Try s3gen.safetensors first (raw PyTorch weights for exact parity)
         let s3genWeightsURL: URL?
         if FileManager.default.fileExists(atPath: s3genPyTorchURL.path) {
             print("Found raw PyTorch S3Gen weights: s3gen.safetensors")
@@ -232,17 +197,77 @@ public actor ChatterboxEngine {
             s3genWeightsURL = nil
         }
 
-        if let s3genURL = s3genWeightsURL {
-            print("Loading S3Gen with weights...")
+        // 🚀 PARALLEL LOADING: Load T3 and S3Gen weights simultaneously
+        print("⚡️ Loading models in parallel...")
+        let loadStart = Date()
 
-            // Load S3Gen weights (complete FP16 or partial)
-            let s3genWeights = try MLX.loadArrays(url: s3genURL)
-            print("Loaded \(s3genWeights.count) S3Gen weight arrays")
+        var rawWeights: [String: MLXArray]? = nil
+        var s3genWeights: [String: MLXArray]? = nil
+
+        try await withThrowingTaskGroup(of: (String, [String: MLXArray]).self) { group in
+            // Task 1: Load T3 weights (2GB)
+            if let t3URL = t3WeightsURL {
+                group.addTask {
+                    print("  📥 T3: Loading from \(t3URL.lastPathComponent)...")
+                    let weights = try MLX.loadArrays(url: t3URL)
+                    print("  ✅ T3: Loaded \(weights.count) arrays")
+                    return ("t3", weights)
+                }
+            }
+
+            // Task 2: Load S3Gen weights (1GB)
+            if let s3genURL = s3genWeightsURL {
+                group.addTask {
+                    print("  📥 S3Gen: Loading from \(s3genURL.lastPathComponent)...")
+                    let weights = try MLX.loadArrays(url: s3genURL)
+                    print("  ✅ S3Gen: Loaded \(weights.count) arrays")
+                    return ("s3gen", weights)
+                }
+            }
+
+            // Collect results
+            for try await (modelType, weights) in group {
+                if modelType == "t3" {
+                    rawWeights = weights
+                } else {
+                    s3genWeights = weights
+                }
+            }
+        }
+
+        let loadTime = Date().timeIntervalSince(loadStart)
+        print("⚡️ Parallel loading completed in \(String(format: "%.2f", loadTime))s")
+
+        // Create T3 model
+        if let rawT3Weights = rawWeights {
+            let t3Weights = remapT3Keys(rawT3Weights)
+            print("Creating T3Model with \(t3Weights.count) weights...")
+            self.t3 = T3Model(config: config, weights: t3Weights, ropeFreqsURL: ropeFreqsURL)
+        } else {
+            print("Warning: No T3 weights found (checked: \(t3WeightFiles.joined(separator: ", ")))")
+            self.t3 = T3Model(config: config)
+        }
+
+        // Verify embeddings (deferred eval for performance)
+        if let t3 = t3 {
+            // Note: Removed immediate eval() for speed - lazy evaluation is faster
+            let min = t3.textEmb.weight.min().item(Float.self)
+            let max = t3.textEmb.weight.max().item(Float.self)
+            print("✅ textEmb.weight: min=\(min), max=\(max)")
+
+            if min == 0.0 && max == 0.0 {
+                print("⚠️ WARNING: Embeddings are zeros - weight loading may have failed!")
+            }
+        }
+
+        // Create S3Gen model
+        if let s3Weights = s3genWeights {
+            print("Creating S3Gen with \(s3Weights.count) weight arrays...")
 
             // Merge with any additional weights from rawWeights (for quantized encoder etc.)
             // FP16 weights take priority over quantized
             var flowWeights = rawWeights ?? [:]
-            for (key, value) in s3genWeights {
+            for (key, value) in s3Weights {
                 flowWeights[key] = value  // FP16 overwrites quantized
             }
             print("Merged flow weights: \(flowWeights.count) total arrays")
@@ -250,7 +275,9 @@ public actor ChatterboxEngine {
             // s3gen.safetensors and s3gen_fp16.safetensors both include vocoder weights (mel2wav.*)
             // Extract vocoder weights from flowWeights (they have "mel2wav." or "s3gen.mel2wav." prefix)
             let vocoderWeights = flowWeights  // S3Gen.init will filter for mel2wav keys
-            print("Vocoder weights included in \(s3genURL.lastPathComponent) (mel2wav.* keys)")
+            if let url = s3genWeightsURL {
+                print("Vocoder weights included in \(url.lastPathComponent) (mel2wav.* keys)")
+            }
 
             // Create S3Gen
             // Set deterministic seed for reproducible bias initialization

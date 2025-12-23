@@ -24,6 +24,10 @@ let package = Package(
             name: "GenerateTestSentences",
             targets: ["GenerateTestSentences"]
         ),
+        .executable(
+            name: "TTSServer",
+            targets: ["TTSServer"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.21.0"),
@@ -56,6 +60,11 @@ let package = Package(
             name: "GenerateTestSentences",
             dependencies: ["Nightingale"],
             path: "test_scripts/GenerateTestSentences"
+        ),
+        .executableTarget(
+            name: "TTSServer",
+            dependencies: ["Nightingale"],
+            path: "test_scripts/TTSServer"
         ),
     ]
 )

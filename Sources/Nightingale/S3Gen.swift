@@ -3501,46 +3501,23 @@ public class S3Gen: Module {
 
         // 2. Prepare inputs
         let inputs = concatenated([promptToken, tokens], axis: 1)
-        print("  🔍 DEBUG getEncoderAndFlowOutput:")
-        print("    promptToken shape: \(promptToken.shape)")
-        print("    tokens shape: \(tokens.shape)")
-        print("    inputs shape (after concat): \(inputs.shape)")
         let vocabSize = inputEmbedding.weight.shape[0]
         let clippedInputs = clip(inputs, min: 0, max: vocabSize - 1)
 
         // 3. Token embedding
         let x = inputEmbedding(clippedInputs)
-        eval(x)
 
         // 4. Encode
         let h = encoder(x)
         let mu = encoderProj(h)
-        eval(mu)
-        print("    h shape (encoder output): \(h.shape)")
-        print("    mu shape (after encoderProj): \(mu.shape)")
-
-        // Save encoder outputs
-        do {
-            try MLX.save(arrays: [
-                "encoder_out": h,
-                "mu": mu
-            ], url: URL(fileURLWithPath: "\(FileManager.default.currentDirectoryPath)/E2E/swift_encoder_outputs.safetensors"))
-            print("  💾 Saved Swift encoder outputs")
-        } catch {
-            print("  ⚠️  Could not save encoder outputs: \(error)")
-        }
+        eval(mu)  // Force evaluation to avoid deferred computation overhead
 
         // 5. Prepare conditions for flow decoder
         let promptMel = promptFeat
         let L_pm = promptMel.shape[1]
-        print("    promptMel shape: \(promptMel.shape)")
-        print("    L_pm (prompt mel length): \(L_pm)")
         let L_new = mu.shape[1] - L_pm
-        print("    L_new (mu.shape[1] - L_pm): \(L_new)")
         let muZeros = MLXArray.zeros([1, L_new, 80], dtype: mu.dtype)
         let conds = concatenated([promptMel, muZeros], axis: 1)
-        eval(conds)
-        print("    conds shape: \(conds.shape)")
 
         // 6. Flow decoder - prepare inputs
         let L_total = conds.shape[1]
@@ -3560,39 +3537,14 @@ public class S3Gen: Module {
             tSpan.append(cosineT)
         }
 
-        // Initialize noise
+        // Initialize noise and ODE solver
         var xt = fixedNoise[0..., 0..., 0..<L_total]
-        eval(xt)
-
-        // Euler ODE solver
         var currentT = tSpan[0]
         var dt = tSpan[1] - tSpan[0]
 
-        print("\n🔍 SWIFT ODE TRACE - Step-by-Step")
-        print(String(repeating: "=", count: 80))
-        print("Initial noise: range=[\(xt.min().item(Float.self)), \(xt.max().item(Float.self))], mean=\(xt.mean().item(Float.self))")
-        print("Time schedule: \(tSpan)")
-
-        // Save ODE initialization
-        do {
-            try MLX.save(arrays: [
-                "mu_T": muT,
-                "cond_T": condsT,
-                "spk_emb": spkCond,
-                "initial_noise": xt,
-                "t_span": MLXArray(tSpan)
-            ], url: URL(fileURLWithPath: "\(FileManager.default.currentDirectoryPath)/E2E/swift_ode_init.safetensors"))
-            print("  💾 Saved Swift ODE initialization")
-        } catch {
-            print("  ⚠️  Could not save ODE init: \(error)")
-        }
-
+        // ODE solver loop
         for step in 1...nTimesteps {
             let t = MLXArray([currentT])
-
-            print("\n--- Step \(step)/\(nTimesteps) ---")
-            print("t=\(currentT), dt=\(dt)")
-            print("xt before: range=[\(xt.min().item(Float.self)), \(xt.max().item(Float.self))], mean=\(xt.mean().item(Float.self))")
 
             // CFG: Conditional and unconditional passes
             // Python flow_matching.py line 128: mask_in[:B] = mask_in[B:] = mask
@@ -3606,53 +3558,16 @@ public class S3Gen: Module {
             let condIn = concatenated([condsT, MLXArray.zeros(like: condsT)], axis: 0)  // Uncond cond=0
             let tIn = concatenated([t, t], axis: 0)
 
-            if step == 1 {
-                print("Decoder inputs (step 1 only):")
-                print("  xIn: \(xIn.shape), range=[\(xIn.min().item(Float.self)), \(xIn.max().item(Float.self))]")
-                print("  muIn: \(muIn.shape), range=[\(muIn.min().item(Float.self)), \(muIn.max().item(Float.self))]")
-                print("  condIn: \(condIn.shape), range=[\(condIn.min().item(Float.self)), \(condIn.max().item(Float.self))]")
-                print("  spkIn: \(spkIn.shape), range=[\(spkIn.min().item(Float.self)), \(spkIn.max().item(Float.self))]")
-                print("  maskIn: \(maskIn.shape) - [mask=1, zeroMask=0]")
-            }
-
             // Forward pass (Batch=2)
             let vBatch = decoder(x: xIn, mu: muIn, t: tIn, speakerEmb: spkIn, cond: condIn, mask: maskIn)
 
-            // Split
+            // Split and apply CFG
             let vCond = vBatch[0].expandedDimensions(axis: 0)
             let vUncond = vBatch[1].expandedDimensions(axis: 0)
-
-            print("Decoder outputs:")
-            print("  vCond: range=[\(vCond.min().item(Float.self)), \(vCond.max().item(Float.self))], mean=\(vCond.mean().item(Float.self))")
-            print("  vUncond: range=[\(vUncond.min().item(Float.self)), \(vUncond.max().item(Float.self))], mean=\(vUncond.mean().item(Float.self))")
-
-            // CFG formula: v = (1 + cfg) * vCond - cfg * vUncond
             let v = (1.0 + cfgRate) * vCond - cfgRate * vUncond
-            eval(v)
-
-            print("  v (after CFG): range=[\(v.min().item(Float.self)), \(v.max().item(Float.self))], mean=\(v.mean().item(Float.self))")
 
             // Euler step
             xt = xt + v * dt
-            eval(xt)
-
-            print("xt after: range=[\(xt.min().item(Float.self)), \(xt.max().item(Float.self))], mean=\(xt.mean().item(Float.self))")
-
-            // Save step 1 for comparison
-            if step == 1 {
-                do {
-                    try MLX.save(arrays: [
-                        "x_before": xt - v * dt,  // Reconstruct x_before
-                        "v_cond": vCond,
-                        "v_uncond": vUncond,
-                        "v_cfg": v,
-                        "x_after": xt
-                    ], url: URL(fileURLWithPath: "\(FileManager.default.currentDirectoryPath)/E2E/swift_ode_step1.safetensors"))
-                    print("  💾 Saved Swift ODE step 1 tensors")
-                } catch {
-                    print("  ⚠️  Could not save step 1 tensors: \(error)")
-                }
-            }
 
             // Update time
             currentT = currentT + dt
@@ -3661,23 +3576,7 @@ public class S3Gen: Module {
             }
         }
 
-        print("\n" + String(repeating: "=", count: 80))
-
-        // Return FULL mel (including prompt frames) for verification
-        eval(xt)
-        print("FULL MEL FROM FLOW DECODER (including prompt):")
-        print("  Shape: \(xt.shape)")
-        print("  Range: [\(xt.min().item(Float.self)), \(xt.max().item(Float.self))]")
-        print("  Mean: \(xt.mean().item(Float.self))")
-
-        // Also extract the generated portion (without prompt) for reference
-        let rawMel = xt[0..., 0..., L_pm...]
-        eval(rawMel)
-        print("GENERATED MEL ONLY (without prompt):")
-        print("  Shape: \(rawMel.shape)")
-        print("  Range: [\(rawMel.min().item(Float.self)), \(rawMel.max().item(Float.self))]")
-
-        return (mu, xt)  // Return FULL mel for verification
+        return (mu, xt)
     }
 
     // Get encoder output for comparison
