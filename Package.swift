@@ -52,6 +52,18 @@ let package = Package(
             name: "EarlyPlayback",
             targets: ["EarlyPlayback"]
         ),
+        .executable(
+            name: "QuantCompare",
+            targets: ["QuantCompare"]
+        ),
+        .executable(
+            name: "QuickBench",
+            targets: ["QuickBench"]
+        ),
+        .executable(
+            name: "PhraseStreamTest",
+            targets: ["PhraseStreamTest"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.21.0"),
@@ -139,6 +151,33 @@ let package = Package(
                 .product(name: "MLXNN", package: "mlx-swift"),
             ],
             path: "test_scripts/EarlyPlayback"
+        ),
+        .executableTarget(
+            name: "QuantCompare",
+            dependencies: [
+                "Nightingale",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
+            path: "test_scripts/QuantCompare"
+        ),
+        .executableTarget(
+            name: "QuickBench",
+            dependencies: [
+                "Nightingale",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
+            path: "test_scripts/QuickBench"
+        ),
+        .executableTarget(
+            name: "PhraseStreamTest",
+            dependencies: [
+                "Nightingale",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
+            path: "test_scripts/PhraseStreamTest"
         ),
     ]
 )

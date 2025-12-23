@@ -1580,6 +1580,7 @@ public actor ChatterboxEngine {
 
         eval(audio)
         let result = audio.asArray(Float.self)
+
         print("  Generated \(result.count) samples (\(String(format: "%.2f", Float(result.count) / 24000.0))s)")
 
         return result

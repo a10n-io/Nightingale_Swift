@@ -56,34 +56,53 @@ struct StreamingTest {
 
         let initialChunkSize = 20
         let subsequentChunkSize = 10
+        let overlapTokens = 4  // Overlap tokens for continuity
 
         var allAudio: [Float] = []
         var chunkTimes: [(chunk: Int, tokens: Int, time: Double, audioMs: Double)] = []
         var firstAudioTime: Double = 0
 
-        // Process chunks
+        // Process chunks WITH OVERLAP for continuity
         var tokenIndex = 0
         var chunkNum = 0
 
         while tokenIndex < allTokens.count {
             let chunkSize = (chunkNum == 0) ? initialChunkSize : subsequentChunkSize
             let endIndex = min(tokenIndex + chunkSize, allTokens.count)
-            let chunkTokens = Array(allTokens[tokenIndex..<endIndex])
+
+            // Include overlap tokens from previous chunk
+            var chunkTokens: [Int]
+            if chunkNum == 0 {
+                chunkTokens = Array(allTokens[tokenIndex..<endIndex])
+            } else {
+                let overlapStart = max(0, tokenIndex - overlapTokens)
+                chunkTokens = Array(allTokens[overlapStart..<endIndex])
+            }
 
             let chunkStart = Date()
             let chunkAudio = try await engine.synthesizeFromTokens(chunkTokens)
             let chunkTime = Date().timeIntervalSince(chunkStart)
 
-            let audioMs = Double(chunkAudio.count) / 24.0  // 24000 samples/sec = 24 samples/ms
+            // Skip overlap samples (each token ≈ 40ms ≈ 960 samples)
+            let samplesToSkip = (chunkNum == 0) ? 0 : overlapTokens * 960
+
+            var usableAudio: [Float]
+            if samplesToSkip < chunkAudio.count {
+                usableAudio = Array(chunkAudio[samplesToSkip...])
+            } else {
+                usableAudio = chunkAudio
+            }
+
+            let audioMs = Double(usableAudio.count) / 24.0
 
             if chunkNum == 0 {
                 firstAudioTime = chunkTime
             }
 
             chunkTimes.append((chunkNum, chunkTokens.count, chunkTime, audioMs))
-            allAudio.append(contentsOf: chunkAudio)
+            allAudio.append(contentsOf: usableAudio)
 
-            print("  Chunk \(chunkNum): \(chunkTokens.count) tokens → \(String(format: "%.0f", audioMs))ms audio in \(String(format: "%.0f", chunkTime * 1000))ms")
+            print("  Chunk \(chunkNum): \(chunkTokens.count) tokens (\(overlapTokens) overlap) → \(String(format: "%.0f", audioMs))ms audio in \(String(format: "%.0f", chunkTime * 1000))ms")
 
             tokenIndex = endIndex
             chunkNum += 1

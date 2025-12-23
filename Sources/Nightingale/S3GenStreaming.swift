@@ -38,11 +38,16 @@ public class S3GenStreaming {
     /// Audio samples generated so far
     private var generatedSamples: [Float] = []
 
+    /// Track if this is the first chunk (for fast mode)
+    private var isFirstChunk: Bool = true
+
     /// ODE solver overlap frames for continuity (larger = better quality, slower)
-    private let overlapFrames: Int = 32
+    /// 64 frames = ~680ms of context at 256 samples/frame
+    private let overlapFrames: Int = 64
 
     /// Cross-fade samples for smooth chunk transitions
-    private let crossFadeSamples: Int = 480  // 20ms at 24kHz
+    /// Larger = smoother but more latency. 2400 = 100ms at 24kHz
+    private let crossFadeSamples: Int = 2400
 
     /// Previous chunk's tail for cross-fading
     private var previousChunkTail: [Float] = []
@@ -50,10 +55,18 @@ public class S3GenStreaming {
     // MARK: - Configuration
 
     /// Number of ODE timesteps (lower = faster, higher = better quality)
+    /// 8 = best quality, 4 = fast, 2 = fastest
     public var nTimesteps: Int = 8
 
-    /// CFG rate for decoder
+    /// CFG rate for decoder (0 = no CFG = 2x faster)
     public var cfgRate: Float = 0.7
+
+    /// Use fast mode for ALL chunks (fewer ODE steps, no CFG)
+    /// Set to true for speed, false for quality
+    public var fastMode: Bool = true
+
+    /// ODE steps for fast mode (used when fastMode=true)
+    public var fastOdeSteps: Int = 4
 
     // MARK: - Initialization
 
@@ -105,11 +118,10 @@ public class S3GenStreaming {
     private var cachedOdeOutput: MLXArray?
 
     /// Generate audio for new tokens incrementally using WINDOWED ODE
-    /// Only processes new mel frames + small overlap for continuity
+    /// Re-encodes ALL tokens for quality, but only runs ODE on new frames
     /// Returns ONLY the new audio samples (append to previous)
     public func generateIncremental(newTokens: [Int]) -> [Float] {
-        guard let cachedMu = cachedMu,
-              let cachedPromptMel = cachedPromptMel,
+        guard let cachedPromptMel = cachedPromptMel,
               let cachedSpkCond = cachedSpkCond else {
             print("⚠️ S3GenStreaming: Not initialized - call initializeWithPrompt first")
             return []
@@ -117,141 +129,139 @@ public class S3GenStreaming {
 
         let startTime = Date()
 
-        // 1. Encode new tokens
-        let newTokenArray = MLXArray(newTokens.map { Int32($0) }).expandedDimensions(axis: 0)
-        let vocabSize = s3gen.inputEmbedding.weight.shape[0]
-        let clippedNew = clip(newTokenArray, min: 0, max: vocabSize - 1)
-        let newEmb = s3gen.inputEmbedding(clippedNew)
-
-        // 2. Run encoder on new tokens only (approximate - for speed)
-        let newEncoded = s3gen.encoder(newEmb)  // [1, newLen*2, 512]
-        let newMu = s3gen.encoderProj(newEncoded)  // [1, newLen*2, 80]
-
-        // 3. Update cached mu (concatenate new mu)
-        let updatedMu = concatenated([cachedMu, newMu], axis: 1)
-        self.cachedMu = updatedMu
+        // 1. Accumulate all tokens
         processedTokens.append(contentsOf: newTokens)
+
+        // 2. Re-encode ALL tokens with full bidirectional context
+        // This is key for quality - the encoder uses self-attention
+        let allTokenArray = MLXArray(processedTokens.map { Int32($0) }).expandedDimensions(axis: 0)
+        let vocabSize = s3gen.inputEmbedding.weight.shape[0]
+        let clippedAll = clip(allTokenArray, min: 0, max: vocabSize - 1)
+        let allEmb = s3gen.inputEmbedding(clippedAll)
+
+        // Run encoder on ALL tokens for proper bidirectional attention
+        let allEncoded = s3gen.encoder(allEmb)  // [1, allLen*2, 512]
+        let updatedMu = s3gen.encoderProj(allEncoded)  // [1, allLen*2, 80]
+        self.cachedMu = updatedMu
 
         let encoderTime = Date().timeIntervalSince(startTime)
 
-        // 4. WINDOWED ODE: Only process new frames + small overlap
+        // 4. FULL ODE: Run on entire sequence for consistency
+        // This ensures no representation drift between chunks
         let odeStart = Date()
 
         let L_pm = cachedPromptMel.shape[1]
         let L_total = updatedMu.shape[1]
         let L_new = newTokens.count * 2  // Upsampled 2x
 
-        // Window parameters
-        let contextFrames = min(overlapFrames, L_pm)  // Context from prompt
-        let windowStart = max(0, L_total - L_new - contextFrames)
-        let windowLen = L_total - windowStart
-
-        // Extract window from mu [B, T, 80]
-        let muWindow = updatedMu[0..., windowStart..<L_total, 0...]
-
-        // Create conditions for window
-        let windowCondStart = max(0, windowStart - L_pm)
-        let promptInWindow = windowStart < L_pm ? cachedPromptMel[0..., windowStart..<L_pm, 0...] : nil
-        let zerosNeeded = windowLen - (promptInWindow?.shape[1] ?? 0)
-
-        let condsWindow: MLXArray
-        if let prompt = promptInWindow, zerosNeeded > 0 {
+        // Create full conditions [B, T, 80]
+        let zerosNeeded = L_total - L_pm
+        let fullConds: MLXArray
+        if zerosNeeded > 0 {
             let zeros = MLXArray.zeros([1, zerosNeeded, 80], dtype: cachedPromptMel.dtype)
-            condsWindow = concatenated([prompt, zeros], axis: 1)
-        } else if let prompt = promptInWindow {
-            condsWindow = prompt
+            fullConds = concatenated([cachedPromptMel, zeros], axis: 1)
         } else {
-            condsWindow = MLXArray.zeros([1, windowLen, 80], dtype: cachedPromptMel.dtype)
+            fullConds = cachedPromptMel[0..., 0..<L_total, 0...]
         }
 
-        // Initialize noise for WINDOW only
-        let xtWindow = s3gen.fixedNoise[0..., 0..., 0..<windowLen]
-
         // Transpose for decoder [B, C, T]
-        let condsT = condsWindow.transposed(0, 2, 1)
-        let muT = muWindow.transposed(0, 2, 1)
-        let mask = MLXArray.ones([1, 1, windowLen], dtype: muT.dtype)
+        let condsT = fullConds.transposed(0, 2, 1)
+        let muT = updatedMu.transposed(0, 2, 1)
+        let mask = MLXArray.ones([1, 1, L_total], dtype: muT.dtype)
 
-        // Run ODE solver on WINDOW
-        var xtVar = xtWindow
+        // Run ODE solver on FULL sequence
+        // Use fixed noise sliced to full length
+        var xtVar = s3gen.fixedNoise[0..., 0..., 0..<L_total]
+
+        // Use fast mode for all chunks if enabled (consistent quality)
+        let actualSteps = fastMode ? fastOdeSteps : nTimesteps
+        let useCFG = !fastMode  // Skip CFG in fast mode for 2x speedup
 
         // Cosine time scheduling
         var tSpan: [Float] = []
-        for i in 0...nTimesteps {
-            let linearT = Float(i) / Float(nTimesteps)
+        for i in 0...actualSteps {
+            let linearT = Float(i) / Float(actualSteps)
             let cosineT = 1.0 - cos(linearT * 0.5 * Float.pi)
             tSpan.append(cosineT)
         }
 
-        // Pre-allocate CFG tensors (smaller - for window only)
-        let zeroMu = MLXArray.zeros(like: muT)
-        let zeroSpk = MLXArray.zeros(like: cachedSpkCond)
-        let zeroCond = MLXArray.zeros(like: condsT)
-
         var currentT = tSpan[0]
         var dt = tSpan[1] - tSpan[0]
 
-        for step in 1...nTimesteps {
-            let t = MLXArray([currentT])
+        if useCFG {
+            // Full CFG path (slower but higher quality)
+            let zeroMu = MLXArray.zeros(like: muT)
+            let zeroSpk = MLXArray.zeros(like: cachedSpkCond)
+            let zeroCond = MLXArray.zeros(like: condsT)
 
-            // CFG batch
-            let xIn = concatenated([xtVar, xtVar], axis: 0)
-            let maskIn = concatenated([mask, mask], axis: 0)
-            let muIn = concatenated([muT, zeroMu], axis: 0)
-            let spkIn = concatenated([cachedSpkCond, zeroSpk], axis: 0)
-            let condIn = concatenated([condsT, zeroCond], axis: 0)
-            let tIn = concatenated([t, t], axis: 0)
+            for step in 1...actualSteps {
+                let t = MLXArray([currentT])
 
-            let vBatch = s3gen.decoder(x: xIn, mu: muIn, t: tIn, speakerEmb: spkIn, cond: condIn, mask: maskIn)
-            let vCond = vBatch[0].expandedDimensions(axis: 0)
-            let vUncond = vBatch[1].expandedDimensions(axis: 0)
-            let v = (1.0 + cfgRate) * vCond - cfgRate * vUncond
+                let xIn = concatenated([xtVar, xtVar], axis: 0)
+                let maskIn = concatenated([mask, mask], axis: 0)
+                let muIn = concatenated([muT, zeroMu], axis: 0)
+                let spkIn = concatenated([cachedSpkCond, zeroSpk], axis: 0)
+                let condIn = concatenated([condsT, zeroCond], axis: 0)
+                let tIn = concatenated([t, t], axis: 0)
 
-            xtVar = xtVar + v * dt
-            currentT = currentT + dt
-            if step < nTimesteps {
-                dt = tSpan[step + 1] - currentT
+                let vBatch = s3gen.decoder(x: xIn, mu: muIn, t: tIn, speakerEmb: spkIn, cond: condIn, mask: maskIn)
+                let vCond = vBatch[0].expandedDimensions(axis: 0)
+                let vUncond = vBatch[1].expandedDimensions(axis: 0)
+                let v = (1.0 + cfgRate) * vCond - cfgRate * vUncond
+
+                xtVar = xtVar + v * dt
+                currentT = currentT + dt
+                if step < actualSteps {
+                    dt = tSpan[step + 1] - currentT
+                }
+            }
+        } else {
+            // Fast path: no CFG (2x fewer decoder calls)
+            for step in 1...actualSteps {
+                let t = MLXArray([currentT])
+                let v = s3gen.decoder(x: xtVar, mu: muT, t: t, speakerEmb: cachedSpkCond, cond: condsT, mask: mask)
+                xtVar = xtVar + v * dt
+                currentT = currentT + dt
+                if step < actualSteps {
+                    dt = tSpan[step + 1] - currentT
+                }
             }
         }
 
         let odeTime = Date().timeIntervalSince(odeStart)
 
-        // 5. Vocoder - process full window, then extract new portion with cross-fade
+        // 5. Vocoder with context overlap to avoid edge artifacts
         let vocoderStart = Date()
 
-        // Vocoder the FULL window (including overlap for continuity)
-        let wav = s3gen.vocoder(xtVar)
+        // Include some context frames before new frames for vocoder
+        // Vocoder needs receptive field context to avoid clicking at boundaries
+        let vocoderContextFrames = 32  // ~340ms context at 256 samples/frame
+        let melStartWithContext = max(0, L_total - L_new - vocoderContextFrames)
+        let contextUsed = L_total - L_new - melStartWithContext  // Actual context frames used
+
+        // Extract mel frames with context [B, C, T]
+        let melFramesWithContext = xtVar[0..., 0..., melStartWithContext...]
+
+        // Vocoder the extended region
+        let wav = s3gen.vocoder(melFramesWithContext)
         eval(wav)
 
-        var windowSamples = wav.asArray(Float.self)
+        let allSamples = wav.asArray(Float.self)
 
-        // Calculate where new audio starts (skip overlap context in audio domain)
-        // Each mel frame ≈ 256 samples at 24kHz (hop size)
-        let overlapAudioSamples = contextFrames * 256
-
-        // Extract new portion (after overlap)
+        // Discard context audio samples to get only new audio
+        let contextAudioSamples = contextUsed * 256
         var newSamples: [Float]
-        if overlapAudioSamples < windowSamples.count {
-            newSamples = Array(windowSamples[overlapAudioSamples...])
+        if contextAudioSamples < allSamples.count {
+            newSamples = Array(allSamples[contextAudioSamples...])
         } else {
-            newSamples = windowSamples
+            newSamples = allSamples
         }
 
-        // Apply cross-fade with previous chunk for smooth transition
-        if !previousChunkTail.isEmpty && !newSamples.isEmpty {
-            let fadeLen = min(crossFadeSamples, previousChunkTail.count, newSamples.count)
-            for i in 0..<fadeLen {
-                let fadeOut = Float(fadeLen - i) / Float(fadeLen)  // 1.0 -> 0.0
-                let fadeIn = Float(i) / Float(fadeLen)            // 0.0 -> 1.0
-                newSamples[i] = previousChunkTail[previousChunkTail.count - fadeLen + i] * fadeOut + newSamples[i] * fadeIn
-            }
-        }
-
-        // Save tail for next chunk's cross-fade
-        if newSamples.count > crossFadeSamples {
-            previousChunkTail = Array(newSamples.suffix(crossFadeSamples))
-            // Don't include the cross-fade tail in output (will be blended with next chunk)
-            newSamples = Array(newSamples.dropLast(crossFadeSamples))
+        // Simple approach: trim the end of each chunk to remove clicking artifacts
+        // 512 samples = ~21ms at 24kHz - removes vocoder edge effects
+        let trimSamples = 512
+        if newSamples.count > trimSamples {
+            newSamples = Array(newSamples.dropLast(trimSamples))
         }
 
         generatedSamples.append(contentsOf: newSamples)
@@ -259,7 +269,7 @@ public class S3GenStreaming {
         let vocoderTime = Date().timeIntervalSince(vocoderStart)
         let totalTime = Date().timeIntervalSince(startTime)
 
-        print("🔊 S3GenStreaming: \(newTokens.count) tokens → \(newSamples.count) samples (\(String(format: "%.0f", Double(newSamples.count) / 24.0))ms audio) [window: \(windowLen) frames]")
+        print("🔊 S3GenStreaming: \(newTokens.count) tokens → \(newSamples.count) samples (\(String(format: "%.0f", Double(newSamples.count) / 24.0))ms audio) [full ODE: \(L_total) frames, new: \(L_new)]")
         print("   Encoder: \(String(format: "%.0f", encoderTime * 1000))ms | ODE: \(String(format: "%.0f", odeTime * 1000))ms | Vocoder: \(String(format: "%.0f", vocoderTime * 1000))ms | Total: \(String(format: "%.0f", totalTime * 1000))ms")
 
         return newSamples
@@ -276,6 +286,7 @@ public class S3GenStreaming {
         promptTokenCount = 0
         processedTokens = []
         generatedSamples = []
+        isFirstChunk = true  // Reset for next utterance
         print("🔄 S3GenStreaming: State reset")
     }
 
