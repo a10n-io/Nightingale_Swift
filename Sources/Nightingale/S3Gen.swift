@@ -662,13 +662,11 @@ public class UpsampleEncoder: Module {
     }
 
     public func callAsFunction(_ x: MLXArray, seqLen: MLXArray? = nil) -> MLXArray {
-        print("DEBUG Encoder: callAsFunction called, x.shape = \(x.shape)"); fflush(stdout)
         // x: [B, T, D]
         // seqLen: [B] - actual sequence lengths for attention masking
 
         // Create attention mask if sequence length is provided
         // Mask shape: [B, 1, T] where mask[b, 0, t] = 1 if t < seqLen[b] else 0
-        print("DEBUG Encoder: Creating mask..."); fflush(stdout)
         var mask: MLXArray? = nil
         if let len = seqLen {
             let B = x.shape[0]
@@ -682,243 +680,51 @@ public class UpsampleEncoder: Module {
             // Add dimension: [B, 1, T]
             mask = maskBT.expandedDimensions(axis: 1)
         }
-        print("DEBUG Encoder: Mask created"); fflush(stdout)
 
         // 1. Embed + RelPos
-        print("DEBUG Encoder: 1. Calling embedLinear..."); fflush(stdout)
         var h = embedLinear(x)
-        eval(h)
-        print("DEBUG Encoder: ⚠️  After embedLinear - Range: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]"); fflush(stdout)
-        print("DEBUG Encoder: embedLinear done, calling embedNorm..."); fflush(stdout)
-
-        // CHECK: LayerNorm weights
-        print("DEBUG Encoder: ⚠️  Checking embedNorm weights..."); fflush(stdout)
-        if let gamma = embedNorm.weight {
-            eval(gamma)
-            print("DEBUG Encoder: embedNorm gamma: shape=\(gamma.shape), range=[\(gamma.min().item(Float.self)), \(gamma.max().item(Float.self))], mean=\(gamma.mean().item(Float.self))"); fflush(stdout)
-        } else {
-            print("DEBUG Encoder: ❌ embedNorm has NO gamma (weight is nil)"); fflush(stdout)
-        }
-        if let beta = embedNorm.bias {
-            eval(beta)
-            print("DEBUG Encoder: embedNorm beta: shape=\(beta.shape), range=[\(beta.min().item(Float.self)), \(beta.max().item(Float.self))]"); fflush(stdout)
-        } else {
-            print("DEBUG Encoder: ❌ embedNorm has NO beta (bias is nil)"); fflush(stdout)
-        }
-
         h = embedNorm(h)
-        print("DEBUG Encoder: embedNorm done"); fflush(stdout)
-
-        // CHECK: embedNorm output FULL statistics for Python comparison
-        eval(h)
-        let embedNormMin = h.min().item(Float.self)
-        let embedNormMax = h.max().item(Float.self)
-        let embedNormMean = h.mean().item(Float.self)
-        // Calculate std: sqrt(variance)
-        let embedNormVariance = ((h - h.mean()) * (h - h.mean())).mean()
-        eval(embedNormVariance)
-        let embedNormStd = sqrt(embedNormVariance.item(Float.self))
-        print("DEBUG Encoder: ⚠️  embedNorm output FULL STATS:"); fflush(stdout)
-        print("  Range: [\(embedNormMin), \(embedNormMax)]"); fflush(stdout)
-        print("  Mean: \(embedNormMean)"); fflush(stdout)
-        print("  Std: \(embedNormStd)"); fflush(stdout)
-        print("  Python ref: mean=0.001553, std=0.150711, range=[-0.630, 0.768]"); fflush(stdout)
-        if abs(embedNormStd - 0.150711) < 0.01 {
-            print("  ✅ Std matches Python!"); fflush(stdout)
-        } else {
-            print("  ❌ Std DIFFERS from Python by \((embedNormStd - 0.150711) / 0.150711 * 100)%"); fflush(stdout)
-        }
-        if abs(embedNormMax - 0.768) < 0.05 {
-            print("  ✅ Max matches Python!"); fflush(stdout)
-        } else {
-            print("  ❌ Max is \(embedNormMax / 0.768 * 100)% of Python"); fflush(stdout)
-        }
-
-        print("DEBUG Encoder: Calling posEnc (xscale=\(posEnc.xscale))..."); fflush(stdout)
-        print("DEBUG Encoder: posEnc.pe shape = \(posEnc.pe.shape) (should be [1, 9999, 512] if loaded)"); fflush(stdout)
-        print("DEBUG Encoder: posEnc.pe first 3 = \(posEnc.pe[0, 0, 0..<3])"); fflush(stdout)
-        // DEBUG: Check h BEFORE posEnc
-        eval(h)
-        let hBeforeMin = h.min().item(Float.self)
-        let hBeforeMax = h.max().item(Float.self)
-        print("DEBUG Encoder: h BEFORE posEnc - Range: [\(hBeforeMin), \(hBeforeMax)]"); fflush(stdout)
         let (hScaled, posEmb) = posEnc(h)
         h = hScaled
-        // DEBUG: Check h AFTER posEnc (should be h * xscale)
-        eval(h)
-        let hAfterMin = h.min().item(Float.self)
-        let hAfterMax = h.max().item(Float.self)
-        let actualRatio = hAfterMax / hBeforeMax
-        print("DEBUG Encoder: h AFTER posEnc - Range: [\(hAfterMin), \(hAfterMax)]"); fflush(stdout)
-        print("DEBUG Encoder: Actual scaling ratio: \(actualRatio)x (expected \(posEnc.xscale)x)"); fflush(stdout)
-        print("DEBUG Encoder: posEmb shape = \(posEmb.shape)"); fflush(stdout)
-
-        // CHECK: After posEnc scaling
-        eval(h)
-        print("DEBUG Encoder: ⚠️  After posEnc - Range: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]"); fflush(stdout)
-        let scalingRatio = h.max().item(Float.self) / 0.768  // Compare to Python's after_embed max
-        print("DEBUG Encoder: Scaling ratio from embedNorm output: \(scalingRatio)x"); fflush(stdout)
 
         // 2. PreLookahead
-        print("DEBUG Encoder: 2. Calling preLookaheadLayer..."); fflush(stdout)
         if let layer = preLookaheadLayer as? PreLookahead {
             h = layer(h)
         } else if let layer = preLookaheadLayer as? PreLookaheadLayer {
             h = layer(h)
         }
-        eval(h)
-        print("DEBUG Encoder: After preLookaheadLayer - Range: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]"); fflush(stdout)
-        print("DEBUG Encoder: After preLookahead[0,0,:5]: \(h[0, 0, 0..<5].asArray(Float.self))"); fflush(stdout)
 
         // 3. Encoders (pass posEmb and mask)
-        print("DEBUG Encoder: 3. Running \(encoders.count) encoder layers..."); fflush(stdout)
-        for (i, layer) in encoders.enumerated() {
-            // Track input for amplification calculation
-            let hInput = h
-            eval(hInput)
-            let inputMax = max(abs(hInput.min().item(Float.self)), abs(hInput.max().item(Float.self)))
-
-            // Enable debug for first layer only
-            if i == 0 {
-                ConformerBlock.debugEnabled = true
-            }
+        for layer in encoders {
             h = layer(h, mask: mask, posEmb: posEmb)
-            if i == 0 {
-                ConformerBlock.debugEnabled = false
-            }
-
-            // Track output and calculate amplification
-            eval(h)
-            let outputMin = h.min().item(Float.self)
-            let outputMax = h.max().item(Float.self)
-            let outputMaxAbs = max(abs(outputMin), abs(outputMax))
-            let amplification = inputMax > 0 ? outputMaxAbs / inputMax : 0.0
-
-            print("DEBUG Encoder: Encoder[\(i)]: input_max_abs=\(inputMax), output_max_abs=\(outputMaxAbs), amplification=\(String(format: "%.4f", amplification))x"); fflush(stdout)
         }
-        print("DEBUG Encoder: All encoder layers done"); fflush(stdout)
-        eval(h)
-        print("DEBUG Encoder: After 6 conformers - Range: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]"); fflush(stdout)
-        print("DEBUG Encoder: After 6 conformers[0,0,:5]: \(h[0, 0, 0..<5].asArray(Float.self))"); fflush(stdout)
-
-        // MAGNITUDE CHECK: Before Upsample
-        print("DEBUG Encoder: ⚠️  MAGNITUDE CHECK - Before upLayer"); fflush(stdout)
-        eval(h)
-        let preUpMin = h.min().item(Float.self)
-        let preUpMax = h.max().item(Float.self)
-        print("DEBUG Encoder: Before upLayer - Range: [\(preUpMin), \(preUpMax)], shape: \(h.shape)"); fflush(stdout)
 
         // 4. Upsample
-        print("DEBUG Encoder: 4. Transposing for upsample..."); fflush(stdout)
         h = h.transposed(0, 2, 1) // [B, C, T]
-
-        // CHECK: Upsample1D conv weights
-        print("DEBUG Encoder: ⚠️  Checking upLayer.conv weights..."); fflush(stdout)
-        let convWeight = upLayer.conv.weight
-        eval(convWeight)
-        print("DEBUG Encoder: upLayer.conv.weight: shape=\(convWeight.shape), range=[\(convWeight.min().item(Float.self)), \(convWeight.max().item(Float.self))], mean=\(convWeight.mean().item(Float.self))"); fflush(stdout)
-
-        print("DEBUG Encoder: Calling upLayer..."); fflush(stdout)
         h = upLayer(h)
-        print("DEBUG Encoder: upLayer done, transposing back..."); fflush(stdout)
         h = h.transposed(0, 2, 1) // [B, T, C]
-        print("DEBUG Encoder: Transpose back done, h.shape = \(h.shape)"); fflush(stdout)
-
-        // MAGNITUDE CHECK: After Upsample
-        print("DEBUG Encoder: ⚠️  MAGNITUDE CHECK - After upLayer"); fflush(stdout)
-        eval(h)
-        let postUpMin = h.min().item(Float.self)
-        let postUpMax = h.max().item(Float.self)
-        print("DEBUG Encoder: After upLayer - Range: [\(postUpMin), \(postUpMax)], shape: \(h.shape)"); fflush(stdout)
-        print("DEBUG Encoder: Magnitude change: \(preUpMax) -> \(postUpMax) (ratio: \(postUpMax/preUpMax))"); fflush(stdout)
-        print("DEBUG Encoder: CHECKPOINT A - About to check boundary trace"); fflush(stdout)
-
-        // Debug: Print boundary values after upsampling
-        if h.shape[1] >= 548 {
-            print("DEBUG Encoder: Boundary trace condition met, h.shape[1] = \(h.shape[1])"); fflush(stdout)
-            print("DEBUG Encoder: About to eval(h) for boundary trace..."); fflush(stdout)
-            eval(h)
-            print("DEBUG Encoder: eval(h) for boundary trace done"); fflush(stdout)
-            print("\n====== ENCODER BOUNDARY TRACE ======"); fflush(stdout)
-            print("After upsampling: \(h.shape)"); fflush(stdout)
-            print("DEBUG Encoder: About to get h.min() for range..."); fflush(stdout)
-            let hMin = h.min()
-            eval(hMin)
-            let hMax = h.max()
-            eval(hMax)
-            print("Range: [\(hMin.item(Float.self)), \(hMax.item(Float.self))]"); fflush(stdout)
-            print("\n⚠️  Boundary positions:"); fflush(stdout)
-            // Only check positions that exist in this sequence (h.shape[1] = \(h.shape[1]))
-            let maxPos = h.shape[1] - 1
-            for t in [498, 499, 500] {
-                if t <= maxPos {
-                    print("DEBUG Encoder: Getting position \(t)..."); fflush(stdout)
-                    let v0 = h[0, t, 0].item(Float.self)
-                    let v1 = h[0, t, 1].item(Float.self)
-                    let v2 = h[0, t, 2].item(Float.self)
-                    print(String(format: "⚠️ Pos %3d: [%10.6f, %10.6f, %10.6f, ...]", t, v0, v1, v2)); fflush(stdout)
-                }
-            }
-            print("\nPython comparison:"); fflush(stdout)
-            print("  Python range: [-595.097, 851.417]"); fflush(stdout)
-            print("  ⚠️  Pos 498: [-16.364107, -14.741450, -57.778362]"); fflush(stdout)
-            print("  ⚠️  Pos 499: [ 57.294426,  -1.231192, -85.779099]"); fflush(stdout)
-            print("  ⚠️  Pos 500: [ 76.392265,  19.593866, -79.950188]"); fflush(stdout)
-            if hMax.item(Float.self) > 50.0 {
-                print("\n✅ Swift HAS huge boundary spikes (like Python)"); fflush(stdout)
-            } else {
-                print("\n❌ Swift MISSING huge boundary spikes - ROOT CAUSE!"); fflush(stdout)
-            }
-            print("====================================\n"); fflush(stdout)
-        }
-        print("DEBUG Encoder: CHECKPOINT B - After boundary trace check"); fflush(stdout)
 
         // After upsampling, sequence length doubles
-        print("DEBUG Encoder: CHECKPOINT C - Before mask doubling, mask is nil: \(mask == nil)"); fflush(stdout)
         if var m = mask {
             // Repeat each element twice along time dimension
             // [B, 1, T] -> [B, 1, 2*T]
-            // Simply concatenate mask with itself to double the sequence
-            print("DEBUG Encoder: CHECKPOINT D - Doubling mask"); fflush(stdout)
             m = concatenated([m, m], axis: 2)
             mask = m
-            print("DEBUG Encoder: CHECKPOINT E - Mask doubled"); fflush(stdout)
         }
-        print("DEBUG Encoder: CHECKPOINT F - After mask doubling"); fflush(stdout)
 
         // 5. UpEmbed
-        eval(h)  // Force evaluation before accessing shape
-        print("DEBUG Encoder: 5. Starting upEmbed, h.shape = \(h.shape)"); fflush(stdout)
-        print("DEBUG Encoder: upEmbedLinear.weight shape = \(upEmbedLinear.weight.shape)"); fflush(stdout)
-        eval(upEmbedLinear.weight)
         h = upEmbedLinear(h)
-        print("DEBUG Encoder: After upEmbedLinear"); fflush(stdout)
-        eval(h)  // Force eval before norm
-        print("DEBUG Encoder: Before upEmbedNorm, h.shape = \(h.shape)"); fflush(stdout)
         h = upEmbedNorm(h)
-        print("DEBUG Encoder: After upEmbedNorm"); fflush(stdout)
-        eval(h)
-        print("DEBUG Encoder: After upEmbedNorm eval, h.shape = \(h.shape)"); fflush(stdout)
-        eval(h)  // Force eval before upPosEnc
-        print("DEBUG Encoder: upPosEnc.pe shape = \(upPosEnc.pe.shape) (should be [1, 9999, 512])")
         let (hUp, posEmbUp) = upPosEnc(h)
-        eval(posEmbUp)  // Force eval of posEmbUp
-        print("DEBUG Encoder: After upPosEnc, posEmbUp.shape = \(posEmbUp.shape)")
         h = hUp
-        eval(h)  // Force eval before accessing shape
-        print("DEBUG Encoder: Set h = hUp, h.shape = \(h.shape)")
 
         // 6. Up Encoders (with upsampled mask)
-        print("DEBUG Encoder: About to run \(upEncoders.count) upEncoders, h.shape = \(h.shape), mask = \(mask?.shape ?? [0])")
-        for (i, layer) in upEncoders.enumerated() {
-            print("DEBUG Encoder: Running upEncoder[\(i)]...")
+        for layer in upEncoders {
             h = layer(h, mask: mask, posEmb: posEmbUp)
-            print("DEBUG Encoder: upEncoder[\(i)] done, h.shape = \(h.shape)")
         }
 
         // 7. Final Norm
         h = afterNorm(h)
-        print("DEBUG Encoder: About to return h.shape = \(h.shape)")
 
         return h
     }
@@ -2181,62 +1987,29 @@ public class Mel2Wav: Module {
     // Linear upsampling for 1D signals (matches PyTorch's Upsample mode='linear')
     // Smoothly interpolates between values instead of repeating them (tiled)
     private func upsampleLinear1D(_ input: MLXArray, scaleFactor: Int) -> MLXArray {
-        print("🚀 Starting upsampleLinear1D")
-        print("   - Input Shape: \(input.shape)")
-        print("   - Scale: \(scaleFactor)")
-
-        // input: [B, T] where T is the number of time steps
+        // Optimized linear interpolation upsampling
+        // input: [B, T] -> output: [B, T * scaleFactor]
         let B = input.shape[0]
         let inputLen = input.shape[1]
         let outputLen = inputLen * scaleFactor
 
-        print("   - Output length will be: \(outputLen)")
-
-        // Create output indices in the range [0, outputLen)
+        // Compute interpolation indices and weights
         let outIndices = MLXArray(0..<outputLen).asType(.float32)
-        print("   - Created output indices")
-
-        // Map output indices to input coordinate space
-        // For linear interpolation: src_idx = dst_idx * (src_len / dst_len)
         let srcIndices = outIndices * Float(inputLen) / Float(outputLen)
-        print("   - Computed source indices")
-
-        // Get integer and fractional parts
         let srcIndicesInt = floor(srcIndices).asType(.int32)
-        let alpha = srcIndices - floor(srcIndices)  // Fractional part for interpolation
-        print("   - Computed integer and fractional parts")
-
-        // Clamp the next index to avoid going out of bounds
+        let alpha = srcIndices - floor(srcIndices)
         let srcIndicesInt1 = minimum(srcIndicesInt + 1, MLXArray(inputLen - 1))
-        print("   - Clamped indices")
 
-        // Process each batch element
+        // Vectorized batch processing
         var results: [MLXArray] = []
-        print("   - Processing \(B) batch elements...")
         for b in 0..<B {
-            if b == 0 {
-                print("     - Processing batch 0...")
-            }
-            let inputSlice = input[b]  // [T]
-
-            // Gather values at integer positions
+            let inputSlice = input[b]
             let val0 = inputSlice[srcIndicesInt]
             let val1 = inputSlice[srcIndicesInt1]
-
-            // Linear interpolation: val0 + (val1 - val0) * alpha
-            let interpolated = val0 + (val1 - val0) * alpha
-
-            results.append(interpolated)
-            if b == 0 {
-                print("     - Batch 0 complete")
-            }
+            results.append(val0 + (val1 - val0) * alpha)
         }
 
-        print("   - Stacking results...")
-        // Stack back to [B, T_upsampled]
-        let result = stacked(results, axis: 0)
-        print("✅ Finished upsampleLinear1D. Output shape: \(result.shape)")
-        return result
+        return stacked(results, axis: 0)
     }
 
     // Reflection padding for 1D signal (matches PyTorch's reflection_pad1d)
@@ -3186,175 +2959,57 @@ public class S3Gen: Module {
     }
     
     public func generate(tokens: MLXArray, speakerEmb: MLXArray, speechEmbMatrix: MLXArray, promptToken: MLXArray, promptFeat: MLXArray) -> MLXArray {
-        print("DEBUG S3Gen: generate() called"); fflush(stdout)
         // tokens: [1, T] generated speech tokens
         // promptToken: [1, P] history tokens
         // promptFeat: [1, T, 80] history mels (channels-last)
 
         // 1. Prepare Embedding (use speechEmbMatrix, not speakerEmb!)
         // speechEmbMatrix is [1, 192] and gets projected to [1, 80] via spkEmbedAffine
-        // speakerEmb [1, 256] is used separately as "finalize" parameter for the decoder
-        print("DEBUG S3Gen: Preparing speech embedding matrix..."); fflush(stdout)
         var speechEmb = speechEmbMatrix  // [1, 192]
         let norm = sqrt(sum(speechEmb * speechEmb, axis: 1, keepDims: true)) + 1e-8
         speechEmb = speechEmb / norm
-        print("DEBUG S3Gen: Calling spkEmbedAffine on speechEmbMatrix [1, 192]..."); fflush(stdout)
+
         // Project speech embedding [1, 192] -> [1, 80]
-        let spkCond = matmul(speechEmb, spkEmbedAffine.weight) + spkEmbedAffine.bias! // [1, 80]
-        eval(spkCond)
-        let spkFlat = spkCond.flattened(); eval(spkFlat)
-        let spkFirst10 = Array(spkFlat.asArray(Float.self).prefix(10))
-        print("📊 Swift speech embedding (after projection to spkCond):")
-        print("   Shape: \(spkCond.shape)")
-        print("   Range: [\(spkCond.min().item(Float.self)), \(spkCond.max().item(Float.self))]")
-        print("   Mean: \(spkCond.mean().item(Float.self))")
-        print("   First 10: \(spkFirst10)")
-        print("DEBUG S3Gen: spkCond created"); fflush(stdout)
+        let spkCond = matmul(speechEmb, spkEmbedAffine.weight) + spkEmbedAffine.bias!
 
         // 2. Concat prompt tokens + new tokens
-        print("DEBUG S3Gen: Concatenating tokens..."); fflush(stdout)
         let inputs = concatenated([promptToken, tokens], axis: 1)
-        print("DEBUG S3Gen: inputs shape: \(inputs.shape)"); fflush(stdout)
 
         // 3. Embed (clip tokens to valid range like Python)
-        print("DEBUG S3Gen: Embedding tokens..."); fflush(stdout)
         let vocabSize = inputEmbedding.weight.shape[0]
         let clippedInputs = clip(inputs, min: 0, max: vocabSize - 1)
-        print("DEBUG S3Gen: Calling inputEmbedding..."); fflush(stdout)
-        let x = inputEmbedding(clippedInputs) // [1, T_total, 512]
-        print("DEBUG S3Gen: inputEmbedding returned, x.shape = \(x.shape)"); fflush(stdout)
-        print("DEBUG S3Gen: About to eval(x)..."); fflush(stdout)
-        eval(x)
-        print("DEBUG S3Gen: eval(x) completed"); fflush(stdout)
-        print("DEBUG S3Gen: About to get x.min()..."); fflush(stdout)
-        let xMin = x.min()
-        print("DEBUG S3Gen: About to eval xMin..."); fflush(stdout)
-        eval(xMin)
-        print("DEBUG S3Gen: About to call xMin.item()..."); fflush(stdout)
-        let xMinVal = xMin.item(Float.self)
-        print("DEBUG S3Gen: xMin = \(xMinVal)"); fflush(stdout)
-        print("TRACE 1: token_emb shape=\(x.shape), dtype=\(x.dtype), range=[\(xMinVal), \(x.max().item(Float.self))], mean=\(x.mean().item(Float.self))"); fflush(stdout)
+        let x = inputEmbedding(clippedInputs)
 
-        // 4. Encode (with sequence length for proper masking)
-        print("DEBUG S3Gen: Creating seqLen array..."); fflush(stdout)
-        print("DEBUG S3Gen: About to call encoder(x)..."); fflush(stdout)
-        // UpsampleEncoder does encode + 2x upsample, then we project
+        // 4. Encode
         let h = encoder(x) // [1, 2*T_total, 512]
-        print("DEBUG S3Gen: encoder returned, h.shape = \(h.shape)"); fflush(stdout)
-        eval(h)
-        print("DEBUG S3Gen: Calling encoderProj to project 512 → 80..."); fflush(stdout)
         let mu = encoderProj(h) // [1, 2*T_total, 80]
-        print("DEBUG S3Gen: encoderProj returned, mu.shape = \(mu.shape)"); fflush(stdout)
-        eval(mu)
-        print("TRACE 2: encoder_out (mu) shape=\(mu.shape), range=[\(mu.min().item(Float.self)), \(mu.max().item(Float.self))], mean=\(mu.mean().item(Float.self))"); fflush(stdout)
+        eval(mu)  // Force evaluation to avoid deferred computation overhead
 
-        // FORENSIC: Save encoder output (mu after projection) - ALWAYS SAVE
-        do {
-            let forensicDir = "../test_audio/forensic"
-            try? FileManager.default.createDirectory(atPath: forensicDir, withIntermediateDirectories: true)
-            let encoderOutputPath = forensicDir + "/swift_encoder_output.safetensors"
-            try? MLX.save(arrays: ["encoder_output": mu], url: URL(fileURLWithPath: encoderOutputPath))
-            print("  [FORENSIC] Saved encoder output (mu): \(encoderOutputPath)")
-            print("  [FORENSIC] Encoder shape: \(mu.shape), range: [\(mu.min().item(Float.self)), \(mu.max().item(Float.self))], mean: \(mu.mean().item(Float.self))")
-        }
-
-        // DEBUG: Check mu for prompt vs generated regions
-        let muPromptRegion = mu[0, 0..<500, 0...]
-        let muGeneratedRegion = mu[0, 500..., 0...]
-        eval(muPromptRegion); eval(muGeneratedRegion)
-        print("DEBUG: mu prompt region [0, 0..<500] range=[\(muPromptRegion.min().item(Float.self)), \(muPromptRegion.max().item(Float.self))], mean=\(muPromptRegion.mean().item(Float.self))")
-        print("DEBUG: mu generated region [0, 500...] range=[\(muGeneratedRegion.min().item(Float.self)), \(muGeneratedRegion.max().item(Float.self))], mean=\(muGeneratedRegion.mean().item(Float.self))")
-
-        // 6. Cut prompt from mu to get "generated" target length
+        // 5. Prepare conditions for flow decoder
         let promptMel = promptFeat // Already [1, T, 80]
         let L_pm = promptMel.shape[1]
-        eval(promptMel)
-        print("🔍 PROMPT CHECK: promptMel shape=\(promptMel.shape), range=[\(promptMel.min().item(Float.self)), \(promptMel.max().item(Float.self))], mean=\(promptMel.mean().item(Float.self))")
 
         // conds is a hybrid: Ground Truth prompt mels + zeros for new mels
         let L_new = mu.shape[1] - L_pm
         let muZeros = MLXArray.zeros([1, L_new, 80], dtype: mu.dtype)
         let conds = concatenated([promptMel, muZeros], axis: 1) // [1, L_total, 80]
-        eval(conds)
-        print("TRACE 4: L_pm=\(L_pm), L_new=\(L_new), conds shape=\(conds.shape), range=[\(conds.min().item(Float.self)), \(conds.max().item(Float.self))]")
 
-        // 7. Decode (Flow Matching) with CFG
+        // 6. Decode (Flow Matching) with CFG
         let L_total = conds.shape[1]
 
         // Use pre-generated fixed noise (matches Python's CausalConditionalCFM)
         var xt = fixedNoise[0..., 0..., 0..<L_total]
-        eval(xt)
-        print("TRACE 5: noise shape=\(xt.shape), range=[\(xt.min().item(Float.self)), \(xt.max().item(Float.self))]")
-
-        // WEIGHT VERIFICATION
-        let timeMlpW = decoder.timeMLP.linear1.weight
-        eval(timeMlpW)
-        let tmMin = timeMlpW.min().item(Float.self)
-        let tmMax = timeMlpW.max().item(Float.self)
-        print("WEIGHT: timeMLP.linear1.weight \(timeMlpW.shape) range=[\(tmMin), \(tmMax)]")
-
-        // Check attention weights
-        let attn = decoder.downBlocks[0].transformers[0].attention
-        let qW = attn.queryProj.weight; eval(qW)
-        print("WEIGHT: attn.queryProj.weight \(qW.shape) range=[\(qW.min().item(Float.self)), \(qW.max().item(Float.self))], sum=\(qW.sum().item(Float.self))")
-        // Check if bias exists
-        if let qB = attn.queryProj.bias { eval(qB); print("WEIGHT: queryProj has bias: \(qB.shape)") }
-        else { print("WEIGHT: queryProj has NO bias") }
-        if let oB = attn.outProj.bias { eval(oB); print("WEIGHT: outProj has bias: \(oB.shape)") }
-        else { print("WEIGHT: outProj has NO bias") }
-
-        // Check block1.conv and res_conv weights
-        let resnet0 = decoder.downBlocks[0].resnet
-        let block1ConvW = resnet0.block1.conv.conv.weight; eval(block1ConvW)
-        print("WEIGHT: block1.conv.weight shape=\(block1ConvW.shape), range=[\(block1ConvW.min().item(Float.self)), \(block1ConvW.max().item(Float.self))], sum=\(block1ConvW.sum().item(Float.self))")
-        let block1Flat = block1ConvW.flattened(); eval(block1Flat)
-        print("WEIGHT: First 10 block1.conv.weight: \(Array(block1Flat.asArray(Float.self).prefix(10)))")
-
-        let resConvW = resnet0.resConv.weight; eval(resConvW)
-        print("WEIGHT: res_conv.weight shape=\(resConvW.shape), range=[\(resConvW.min().item(Float.self)), \(resConvW.max().item(Float.self))], sum=\(resConvW.sum().item(Float.self))")
-        let resConvFlat = resConvW.flattened(); eval(resConvFlat)
-        print("WEIGHT: First 10 res_conv.weight: \(Array(resConvFlat.asArray(Float.self).prefix(10)))")
-
-        // Check mid block 11 transformer 3 weights
-        if decoder.midBlocks.count > 11 {
-            let mb11 = decoder.midBlocks[11]
-            if mb11.transformers.count > 3 {
-                let tfmr3 = mb11.transformers[3]
-                let qW11 = tfmr3.attention.queryProj.weight; eval(qW11)
-                let ff0W = tfmr3.ff.layers[0].weight; eval(ff0W)
-                let ff1W = tfmr3.ff.layers[1].weight; eval(ff1W)
-                print("WEIGHT: midBlocks[11].tfmr[3].attn.queryProj.weight \(qW11.shape) range=[\(qW11.min().item(Float.self)), \(qW11.max().item(Float.self))], sum=\(qW11.sum().item(Float.self))")
-                print("WEIGHT: midBlocks[11].tfmr[3].ff.layers[0].weight \(ff0W.shape) range=[\(ff0W.min().item(Float.self)), \(ff0W.max().item(Float.self))], sum=\(ff0W.sum().item(Float.self))")
-                print("WEIGHT: midBlocks[11].tfmr[3].ff.layers[1].weight \(ff1W.shape) range=[\(ff1W.min().item(Float.self)), \(ff1W.max().item(Float.self))], sum=\(ff1W.sum().item(Float.self))")
-            }
-        }
-
-        // Check finalProj weights
-        let fpW = decoder.finalProj.weight; eval(fpW)
-        print("WEIGHT: finalProj.weight \(fpW.shape) range=[\(fpW.min().item(Float.self)), \(fpW.max().item(Float.self))], mean=\(fpW.mean().item(Float.self))")
-        if let fpB = decoder.finalProj.bias {
-            eval(fpB)
-            print("WEIGHT: finalProj.bias \(fpB.shape) range=[\(fpB.min().item(Float.self)), \(fpB.max().item(Float.self))], mean=\(fpB.mean().item(Float.self))")
-        }
-        print("WEIGHT: Expected finalProj.weight: shape=[80,1,256], range≈[-0.76,0.87], mean≈0.001")
-        print("WEIGHT: Expected finalProj.bias: shape=[80], range≈[-0.10,-0.04], mean≈-0.074")
 
         // Transpose conds and mu for decoder [B, C, T]
         let condsT = conds.transposed(0, 2, 1)
         let muT = mu.transposed(0, 2, 1)
 
-        // Create mask matching Python: [B, 1, T]
-        // Python: mask = (~make_pad_mask(h_lengths)).unsqueeze(1)
-        // This creates mask=1 for ALL valid positions, mask=0 only for padding
-        // Since we have no padding, mask should be all 1s
-        // The generation conditioning is done through `cond` parameter, not mask!
+        // Create mask matching Python: [B, 1, T] (all 1s for valid positions)
         let mask = MLXArray.ones([1, 1, L_total], dtype: muT.dtype)
-        eval(mask)
-        print("   Mask: shape=\(mask.shape), all_ones (no padding), sum=\(mask.sum().item(Float.self))")
 
-        // ODE Parameters (Python uses n_timesteps=10 by default in flow.py)
+        // ODE Parameters
         let nTimesteps = 10
-        let cfgRate: Float = 0.7  // Match Python decoder CFG default (was 0.7)
+        let cfgRate: Float = 0.7  // Match Python decoder CFG
 
         // Cosine time scheduling
         var tSpan: [Float] = []
@@ -3368,28 +3023,16 @@ public class S3Gen: Module {
         var currentT = tSpan[0]
         var dt = tSpan[1] - tSpan[0]
 
-        print("\n📊 Swift ODE Configuration:")
-        print("   n_timesteps: \(nTimesteps)")
-        print("   CFG rate: \(cfgRate)")
-        print("   t_scheduler: cosine")
-        print("   Timesteps: \(tSpan)")
-        print("   Initial noise: [\(xt.min().item(Float.self)), \(xt.max().item(Float.self))]")
-        print("\n🔄 Starting Swift ODE loop...")
-
         for step in 1...nTimesteps {
             let t = MLXArray([currentT])
-            FlowMatchingDecoder.debugStep = (step == 1) ? 1 : 0
 
             // CFG: Conditional and unconditional passes
-            // Python flow_matching.py line 128: mask_in[:B] = mask_in[B:] = mask
-            // BOTH use SAME mask! Unconditional behavior comes from zero mu/spks/cond only.
-
             // Prepare batch for CFG: [Cond, Uncond]
             let xIn = concatenated([xt, xt], axis: 0)
-            let maskIn = concatenated([mask, mask], axis: 0)  // Both use same mask (match Python!)
-            let muIn = concatenated([muT, MLXArray.zeros(like: muT)], axis: 0)  // Uncond mu=0
-            let spkIn = concatenated([spkCond, MLXArray.zeros(like: spkCond)], axis: 0)  // Uncond spk=0
-            let condIn = concatenated([condsT, MLXArray.zeros(like: condsT)], axis: 0)  // Uncond cond=0
+            let maskIn = concatenated([mask, mask], axis: 0)
+            let muIn = concatenated([muT, MLXArray.zeros(like: muT)], axis: 0)
+            let spkIn = concatenated([spkCond, MLXArray.zeros(like: spkCond)], axis: 0)
+            let condIn = concatenated([condsT, MLXArray.zeros(like: condsT)], axis: 0)
             let tIn = concatenated([t, t], axis: 0)
 
             // Forward pass (Batch=2)
@@ -3400,51 +3043,8 @@ public class S3Gen: Module {
             // CFG formula: v = (1 + cfg) * vCond - cfg * vUncond
             let v = (1.0 + cfgRate) * vCond - cfgRate * vUncond
 
-            // Debug CFG components for first step
-            if step == 1 || step == 5 || step == 10 {
-                eval(vCond); eval(vUncond); eval(v)
-                print("   CFG DEBUG (step \(step)):")
-                print("     vCond:   [\(vCond.min().item(Float.self)), \(vCond.max().item(Float.self))], mean=\(vCond.mean().item(Float.self))")
-                print("     vUncond: [\(vUncond.min().item(Float.self)), \(vUncond.max().item(Float.self))], mean=\(vUncond.mean().item(Float.self))")
-                print("     CFG formula: (1.7) * vCond - (0.7) * vUncond")
-
-                 // Check spatial variation in velocity field to trace accumulation
-                // v shape is [1, 80, T] where T is time dimension at index 2
-                let L_total = v.shape[2]
-                if L_total == 748 {
-                    let L_pm = 500
-                    let vPromptRegion = v[0..., 0..., 0..<L_pm]
-                    let vGeneratedRegion = v[0..., 0..., L_pm...]
-                    eval(vPromptRegion); eval(vGeneratedRegion)
-                    print("     v SPATIAL (step \(step)) - prompt[0..<\(L_pm)]: [\(vPromptRegion.min().item(Float.self)), \(vPromptRegion.max().item(Float.self))], mean=\(vPromptRegion.mean().item(Float.self))")
-                    print("     v SPATIAL (step \(step)) - generated[\(L_pm)...]: [\(vGeneratedRegion.min().item(Float.self)), \(vGeneratedRegion.max().item(Float.self))], mean=\(vGeneratedRegion.mean().item(Float.self))")
-                }
-            }
-
-            // Detailed tracing for all steps
-            eval(v); eval(xt)
-            print("\n--- Swift ODE Step \(step)/\(nTimesteps) ---")
-            print("   t = \(String(format: "%.6f", currentT)), dt = \(String(format: "%.6f", dt))")
-            print("   x before: [\(xt.min().item(Float.self)), \(xt.max().item(Float.self))]")
-            print("   dphi_dt: [\(v.min().item(Float.self)), \(v.max().item(Float.self))]")
-
             // Euler step
             xt = xt + v * dt
-            eval(xt)
-            print("   x after: [\(xt.min().item(Float.self)), \(xt.max().item(Float.self))]")
-
-            // Check spatial variation in xt at key steps
-            if step == 1 || step == 5 || step == 10 {
-                let L_total = xt.shape[2]
-                if L_total == 748 {
-                    let L_pm = 500
-                    let xtPromptRegion = xt[0..., 0..., 0..<L_pm]
-                    let xtGeneratedRegion = xt[0..., 0..., L_pm...]
-                    eval(xtPromptRegion); eval(xtGeneratedRegion)
-                    print("   xt SPATIAL (after step \(step)) - prompt[0..<\(L_pm)]: [\(xtPromptRegion.min().item(Float.self)), \(xtPromptRegion.max().item(Float.self))], mean=\(xtPromptRegion.mean().item(Float.self))")
-                    print("   xt SPATIAL (after step \(step)) - generated[\(L_pm)...]: [\(xtGeneratedRegion.min().item(Float.self)), \(xtGeneratedRegion.max().item(Float.self))], mean=\(xtGeneratedRegion.mean().item(Float.self))")
-                }
-            }
 
             // Update time for next step
             currentT = currentT + dt
@@ -3453,33 +3053,10 @@ public class S3Gen: Module {
             }
         }
 
-        // 8. Vocode
-        eval(xt)
-        print("TRACE 6: ODE output xt shape=\(xt.shape), dtype=\(xt.dtype), range=[\(xt.min().item(Float.self)), \(xt.max().item(Float.self))], mean=\(xt.mean().item(Float.self))")
-
-        // DEBUG: Check prompt region vs generated region
-        let promptRegion = xt[0..., 0..., 0..<L_pm]
-        eval(promptRegion)
-        print("DEBUG: prompt region [0..., 0..., 0..<\(L_pm)] range=[\(promptRegion.min().item(Float.self)), \(promptRegion.max().item(Float.self))], mean=\(promptRegion.mean().item(Float.self))")
-
+        // 7. Vocode - extract generated portion and convert to audio
         let generatedMel = xt[0..., 0..., L_pm...]
-        eval(generatedMel)
-        print("TRACE 7: generatedMel [0..., 0..., \(L_pm)...] shape=\(generatedMel.shape), range=[\(generatedMel.min().item(Float.self)), \(generatedMel.max().item(Float.self))], mean=\(generatedMel.mean().item(Float.self))")
-
-        // Debug: Check raw mel from flow decoder
-        print("MEL CHANNEL ENERGIES (decoder output):")
-        for i in [0, 10, 20, 30, 40, 50, 60, 70, 79] {
-            let channelEnergy = generatedMel[0, i, 0...].mean().item(Float.self)
-            print(String(format: "  Channel %2d: %.4f", i, channelEnergy))
-        }
-
-        // CRITICAL: Pass decoder mel output DIRECTLY to vocoder (match Python)
-        // Python does: output_mels, _ = self.flow.inference(...)
-        //              output_wavs, *_ = self.mel2wav.inference(speech_feat=output_mels, ...)
-        // NO transformation is applied between decoder and vocoder!
         let wav = vocoder(generatedMel)
-        eval(wav)
-        print("TRACE 8: vocoder output shape=\(wav.shape), range=[\(wav.min().item(Float.self)), \(wav.max().item(Float.self))]")
+
         return wav
     }
 

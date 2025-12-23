@@ -182,58 +182,30 @@ public class RelPositionMultiHeadAttention: Module {
         let B = x.shape[0]
         let T = x.shape[1]
 
-        print("🔍 RelPosAttn ENTRY: x.shape=\(x.shape), posEmb.shape=\(posEmb.shape)"); fflush(stdout)
-        print("🔍 RelPosAttn CONFIG: dModel=\(dModel), numHeads=\(numHeads), dHead=\(dHead)"); fflush(stdout)
-
         let q = queryProj(x).reshaped([B, T, numHeads, dHead]).transposed(0, 2, 1, 3) // [B, H, T, D_h]
-        print("🔍 RelPosAttn: q.shape=\(q.shape)"); fflush(stdout)
         let k = keyProj(x).reshaped([B, T, numHeads, dHead]).transposed(0, 2, 1, 3)
-        print("🔍 RelPosAttn: k.shape=\(k.shape)"); fflush(stdout)
         let v = valueProj(x).reshaped([B, T, numHeads, dHead]).transposed(0, 2, 1, 3)
-        print("🔍 RelPosAttn: v.shape=\(v.shape)"); fflush(stdout)
 
         // Pos embeddings
         let nBatchPos = posEmb.shape[0]
         let posSeqLen = posEmb.shape[1]
-        print("🔍 RelPosAttn: About to call linearPos(posEmb)..."); fflush(stdout)
-        print("🔍   posEmb.shape=\(posEmb.shape)"); fflush(stdout)
-        print("🔍   linearPos.weight.shape=\(linearPos.weight.shape)"); fflush(stdout)
-        eval(linearPos.weight)  // Force evaluation to check weight shape
         let pProj = linearPos(posEmb)  // [nBatchPos, posSeqLen, dModel]
-        print("🔍 RelPosAttn: pProj.shape=\(pProj.shape)"); fflush(stdout)
-        print("🔍   Expected: [\(nBatchPos), \(posSeqLen), \(dModel)]"); fflush(stdout)
-        if pProj.shape[2] != dModel {
-            print("🚨🚨🚨 FOUND THE BUG: linearPos output dimension is \(pProj.shape[2]), expected \(dModel)!"); fflush(stdout)
-            fatalError("linearPos projection is WRONG!")
-        }
 
         // Ensure pProj has the right shape before reshaping
-        // pProj should be [nBatchPos, posSeqLen, dModel] where dModel = numHeads * dHead
         let expectedDim = numHeads * dHead
         if pProj.shape[2] != expectedDim {
             fatalError("RelPos: linearPos output dim mismatch! Got \(pProj.shape[2]), expected \(expectedDim) (numHeads=\(numHeads) * dHead=\(dHead))")
         }
 
-        print("🔍 RelPosAttn: About to reshape pProj to [B, T, H, D_h]..."); fflush(stdout)
         let p = pProj.reshaped([nBatchPos, posSeqLen, numHeads, dHead]).transposed(0, 2, 1, 3)
-        print("🔍 RelPosAttn: p.shape=\(p.shape)"); fflush(stdout)
 
         // Add biases
-        print("🔍 RelPosAttn: posBiasU.shape=\(posBiasU.shape), posBiasV.shape=\(posBiasV.shape)"); fflush(stdout)
-        print("🔍 RelPosAttn: About to add posBiasU to q..."); fflush(stdout)
         let qWithBiasU = q + posBiasU.reshaped([1, numHeads, 1, dHead])
-        print("🔍 RelPosAttn: qWithBiasU.shape=\(qWithBiasU.shape)"); fflush(stdout)
-        print("🔍 RelPosAttn: About to add posBiasV to q..."); fflush(stdout)
         let qWithBiasV = q + posBiasV.reshaped([1, numHeads, 1, dHead])
-        print("🔍 RelPosAttn: qWithBiasV.shape=\(qWithBiasV.shape)"); fflush(stdout)
 
         // Attention Scores
-        print("🔍 RelPosAttn: Computing matrixAC = matmul(qWithBiasU, k.T)..."); fflush(stdout)
         let matrixAC = matmul(qWithBiasU, k.transposed(0, 1, 3, 2)) // [B, H, T, T]
-        print("🔍 RelPosAttn: matrixAC.shape=\(matrixAC.shape)"); fflush(stdout)
-        print("🔍 RelPosAttn: Computing matrixBD = matmul(qWithBiasV, p.T)..."); fflush(stdout)
         let matrixBD = matmul(qWithBiasV, p.transposed(0, 1, 3, 2)) // [B, H, T, 2T-1]
-        print("🔍 RelPosAttn: matrixBD.shape=\(matrixBD.shape)"); fflush(stdout)
 
         // RelShift matrixBD
         let matrixBDBshifted = relShift(matrixBD) // [B, H, T, T]
