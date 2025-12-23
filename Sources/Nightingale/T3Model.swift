@@ -1681,99 +1681,8 @@ public class T3Model: Module {
             .reshaped([1, 1, initialSeqLen, initialSeqLen])
         eval(initialMask)
 
-        // ============================================
-        // 🔬 LAYER 0 SURGICAL DIAGNOSTIC
-        // ============================================
-        print("\n" + String(repeating: "=", count: 60))
-        print("🔬 SWIFT LAYER 0 SURGICAL DIAGNOSTIC")
-        print(String(repeating: "=", count: 60))
-
-        // CHECKPOINT 1: Input to Layer 0
-        let checkpoint1 = inputEmb
-        eval(checkpoint1)
-        let c1_b0_first = checkpoint1[0, 0, 0..<5]  // POSITION 0
-        let c1_b0_last = checkpoint1[0, checkpoint1.shape[1]-1, 0..<5]  // POSITION 79
-        let c1_b1 = checkpoint1[1, checkpoint1.shape[1]-1, 0..<5]
-        eval(c1_b0_first, c1_b0_last, c1_b1)
-        print("\n📊 CHECKPOINT 1: Input to Layer 0")
-        print("   Shape: \(checkpoint1.shape)")
-        print("   Batch 0, FIRST Token (Pos 0), First 5: \(c1_b0_first.asArray(Float.self))")
-        print("   Batch 0, LAST Token (Pos 79), First 5: \(c1_b0_last.asArray(Float.self))")
-        print("   Batch 1, Last Token, First 5: \(c1_b1.asArray(Float.self))")
-        print("   Python Pos 0 reference: [-0.006982, -0.016019, -0.012832, 0.014774, -0.018492]")
-        print("   Python Pos 79 reference: [-0.006983, -0.001179, -0.001251, -0.008536, -0.012690]")
-
-        // Get Layer 0
-        guard let layer0 = layers[0] as? TransformerBlock else {
-            print("❌ Layer 0 is not a TransformerBlock! Skipping diagnostic.")
-            // Fall through to normal forward pass with CAUSAL MASK
-            var hidden = forward(inputEmb, cache: cache, mask: causalMask)
-            eval(hidden)
-            var generatedTokens: [Int] = [currentToken]
-            // Continue with normal generation loop...
-            return generatedTokens // Empty for now if this fails
-        }
-
-        // Manually run Layer 0 with checkpoints
-        // CRITICAL: Use a FRESH cache to avoid Heisenbug (cache corruption)
-        let diagnosticCache = KVCache()
-
-        let layer0InputDiag = inputEmb
-        let normedInputDiag = layer0.inputLayernorm(layer0InputDiag)
-
-        // CHECKPOINT 2: Attention Output (before residual) - use CAUSAL MASK
-        let checkpoint2 = layer0.selfAttn(normedInputDiag, mask: causalMaskDebug, cache: diagnosticCache)
-        eval(checkpoint2)
-        let c2_b0 = checkpoint2[0, checkpoint2.shape[1]-1, 0..<5]
-        let c2_b1 = checkpoint2[1, checkpoint2.shape[1]-1, 0..<5]
-        eval(c2_b0, c2_b1)
-        print("\n📊 CHECKPOINT 2: Attention Output (before residual)")
-        print("   Shape: \(checkpoint2.shape)")
-        print("   Batch 0, Last Token, First 5: \(c2_b0.asArray(Float.self))")
-        print("   Batch 1, Last Token, First 5: \(c2_b1.asArray(Float.self))")
-
-        // First residual
-        let h = layer0InputDiag + checkpoint2
-        eval(h)
-
-        // Post-attention layernorm
-        let normedH = layer0.postAttentionLayernorm(h)
-
-        // CHECKPOINT 3: MLP Output (before residual)
-        let checkpoint3 = layer0.mlp(normedH)
-        eval(checkpoint3)
-        let c3_b0 = checkpoint3[0, checkpoint3.shape[1]-1, 0..<5]
-        let c3_b1 = checkpoint3[1, checkpoint3.shape[1]-1, 0..<5]
-        eval(c3_b0, c3_b1)
-        print("\n📊 CHECKPOINT 3: MLP Output (before residual)")
-        print("   Shape: \(checkpoint3.shape)")
-        print("   Batch 0, Last Token, First 5: \(c3_b0.asArray(Float.self))")
-        print("   Batch 1, Last Token, First 5: \(c3_b1.asArray(Float.self))")
-
-        // CHECKPOINT 4: Final Layer 0 Output
-        let checkpoint4 = h + checkpoint3
-        eval(checkpoint4)
-        let c4_b0 = checkpoint4[0, checkpoint4.shape[1]-1, 0..<5]
-        let c4_b1 = checkpoint4[1, checkpoint4.shape[1]-1, 0..<5]
-        eval(c4_b0, c4_b1)
-        print("\n📊 CHECKPOINT 4: Final Layer 0 Output")
-        print("   Shape: \(checkpoint4.shape)")
-        print("   Batch 0, Last Token, First 5: \(c4_b0.asArray(Float.self))")
-        print("   Batch 1, Last Token, First 5: \(c4_b1.asArray(Float.self))")
-
-        print("\n" + String(repeating: "=", count: 60))
-        print("🔍 PYTHON GOLDEN VALUES (from dump_layer0.py):")
-        print(String(repeating: "=", count: 60))
-        print("CHECKPOINT 1: [-0.006982863, -0.0011787415, -0.0012512207, -0.008536339, -0.012689591]")
-        print("CHECKPOINT 2: [-0.05905646, -0.039103009, 0.020378511, 0.041423831, -0.00016348482]")
-        print("CHECKPOINT 3: [0.012531927, 0.055772278, -0.041825336, -0.022350516, -0.024810661]")
-        print("CHECKPOINT 4: [-0.053507395, 0.015490528, -0.022698045, 0.010536976, -0.037663735]")
-        print(String(repeating: "=", count: 60) + "\n")
-
-        // Now run FULL forward pass for actual generation with CAUSAL MASK
-        // CRITICAL FIX: Use fully causal mask like Python's LlamaModel
+        // Run forward pass with causal mask
         var hidden = forward(inputEmb, cache: cache, mask: causalMask)
-        eval(hidden) // Force computation and clear graph
 
         var generatedTokens: [Int] = [currentToken]
 
@@ -1805,91 +1714,10 @@ public class T3Model: Module {
                     let condLogits = allLogits[0, 0..., 0...]    // [1, vocab]
                     let uncondLogits = allLogits[1, 0..., 0...]  // [1, vocab]
 
-                    // --- DEBUG: CFG COMPONENTS (BEFORE combination) ---
-                    if step == 0 {
-                        eval(condLogits, uncondLogits)
-                        let condFlat = condLogits.reshaped([-1])
-                        let uncondFlat = uncondLogits.reshaped([-1])
-
-                        let token1514_cond = condFlat[1514].item(Float.self)
-                        let token1514_uncond = uncondFlat[1514].item(Float.self)
-                        let token3704_cond = condFlat[3704].item(Float.self)
-                        let token3704_uncond = uncondFlat[3704].item(Float.self)
-
-                        print("\n🔍 === SWIFT CFG ANALYSIS (Step 0) ===")
-                        print("CFG COMPONENTS (before combination):")
-                        print("   Token 1514: cond=\(String(format: "%+.6f", token1514_cond)), uncond=\(String(format: "%+.6f", token1514_uncond)), gap=\(String(format: "%+.6f", token1514_cond - token1514_uncond))")
-                        print("   Token 3704: cond=\(String(format: "%+.6f", token3704_cond)), uncond=\(String(format: "%+.6f", token3704_uncond)), gap=\(String(format: "%+.6f", token3704_cond - token3704_uncond))")
-                        print("   CFG weight: \(cfgWeight)")
-                        print("   Formula: cond + cfg * (cond - uncond)\n")
-                    }
-
                     // CFG formula: cond + cfg * (cond - uncond)
-                    // Python t3.py line 358: logits = cond + cfg * (cond - uncond)
-                    // This AMPLIFIES the conditioned logits: (1+cfg)*cond - cfg*uncond
-                    // For cfg=0.5: 1.5*cond - 0.5*uncond
                     logits = condLogits + MLXArray(cfgWeight) * (condLogits - uncondLogits)
                 } else {
                     logits = allLogits[0, 0..., 0...]  // [1, vocab]
-                }
-
-                // --- DEBUG: LOGIT FINGERPRINT (AFTER CFG) ---
-                if step == 0 {  // Only for the first generated token
-                    print("🔍 === SWIFT LOGIT FINGERPRINT (Step 0, AFTER CFG) ===")
-
-                    eval(logits)
-                    let logitsFlat = logits.reshaped([-1])
-
-                    // Create array of (index, value) tuples
-                    var logitPairs: [(Int, Float)] = []
-                    for i in 0..<logitsFlat.shape[0] {
-                        let val = logitsFlat[i].item(Float.self)
-                        logitPairs.append((i, val))
-                    }
-
-                    // Sort descending by value and take top 10
-                    let top10 = logitPairs.sorted { $0.1 > $1.1 }.prefix(10)
-
-                    print("\n🔍 AFTER CFG:")
-                    for (rank, pair) in top10.enumerated() {
-                        print(String(format: "Rank %d: Token %5d | Logit: %+.6f", rank + 1, pair.0, pair.1))
-                    }
-                    print(String(repeating: "=", count: 60) + "\n")
-                }
-                // --------------------------------
-
-                // 🚨 DEBUG: Verify Final Logits (Layer 30) on first step
-                if step == 0 {
-                    eval(logits)
-
-                    let logitsFlat = logits.reshaped([-1])
-                    let maxLogit = logitsFlat.max().item(Float.self)
-                    let argmaxID = logitsFlat.argMax().item(Int.self)
-
-                    // Check EOS logit (should be suppressed)
-                    let eosLogit = logitsFlat[stopSpeechToken].item(Float.self)
-
-                    // Check some specific token scores
-                    let score1486 = logitsFlat[1486].item(Float.self)
-                    let score29 = logitsFlat[29].item(Float.self)
-                    let score3648 = logitsFlat[3648].item(Float.self)
-
-                    print("\n" + String(repeating: "=", count: 60))
-                    print("🔍 SWIFT LAYER 30 (FINAL LOGITS) DEBUG - STEP 0:")
-                    print(String(repeating: "=", count: 60))
-                    print("  Logits shape: \(logits.shape)")
-                    print("  Max Logit Value: \(String(format: "%.6f", maxLogit))")
-                    print("  Argmax Token ID: \(argmaxID)")
-                    print("\n  Specific Token Scores:")
-                    print("    Token 1486: \(String(format: "%.6f", score1486))")
-                    print("    Token 29:   \(String(format: "%.6f", score29))")
-                    print("    Token 3648: \(String(format: "%.6f", score3648))")
-                    print("    EOS (6562): \(String(format: "%.6f", eosLogit))")
-                    print(String(repeating: "=", count: 60))
-                    print("Python Reference: Should see argmax ~1486 (greedy first token)")
-                    print("If argmax matches Python → Model is PERFECT, bug is in sampling")
-                    print("If argmax differs → Divergence in Layers 2-30")
-                    print(String(repeating: "=", count: 60) + "\n")
                 }
 
                 // Sample with temperature, repetition penalty, and top-p + invalid token filtering
@@ -2025,32 +1853,17 @@ public class T3Model: Module {
                 return nextToken
             }
 
-            // Progress logging every 10 tokens
-            if step % 10 == 0 {
-                print("T3: Generated token \(step + 1)/\(maxTokens): \(nextToken)")
-            }
-
             // Check EOS
             if nextToken == stopSpeechToken {
-                print("🛑 T3: Hit EOS (End of Sequence) token \(stopSpeechToken) at step \(step)")
                 break
             }
 
             generatedTokens.append(nextToken)
             currentToken = nextToken
 
-            // 🔬 STEP 1 AUTOREGRESSIVE LOOP DIAGNOSTIC
-            if step == 0 {
-                print("\n🔬 STEP 1 PREPARATION (After generating first token):")
-                print("   ✅ First token generated: \(nextToken)")
-                print("   → This will be INPUT for Step 1")
-                print("   → Expected to match Python if greedy (temp=0)")
-            }
-
             // Prepare next input (also in autoreleasepool)
             // Speech position embeddings are SEPARATE from text/conditioning context
             // BOS is at position 0, first generated token at position 1, etc.
-            // Python: next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
             autoreleasepool {
                 let nextTokenArray = MLXArray([Int32(nextToken)]).reshaped([1, 1])
                 let nextPosition = step + 1  // Position 1, 2, 3, ... (BOS was at 0)
@@ -2065,72 +1878,8 @@ public class T3Model: Module {
                     nextInputEmb = nextEmb
                 }
 
-                // 🔍 CRITICAL DEBUG FOR STEP 1 (USER'S DIAGNOSTIC SCRIPT)
-                if step == 0 {
-                    print("\n" + String(repeating: "=", count: 60))
-                    print("🔍 SWIFT STEP 1 (Token 2) DEBUG:")
-                    print(String(repeating: "=", count: 60))
-                    print("  Input Token: \(nextToken)") // Should be 1486
-                    print("  Input Shape: \(nextInputEmb.shape)")   // Should be [2, 1, 1024] for CFG
-                    print("  Cache Offset (Layer 0): \(cache[0].offset)") // Should be 80 (prompt length)
-                    print("  Mask passed to forward(): nil") // Mask should be nil for incremental
-
-                    // Check cache size
-                    if let cachedKeys = cache[0].keys {
-                        print("  Cache Keys Shape (Layer 0): \(cachedKeys.shape)")
-                        print("    Expected: [2, nKVHeads, 80, headDim] after prefill")
-                    }
-
-                    print("\n  CHECKLIST:")
-                    print("    ✓ Mask is nil? YES (implicit, not passed)")
-                    print("    ✓ RoPE Offset correct? \(cache[0].offset == 80 ? "YES (80)" : "❌ NO (expected 80)")")
-                    print("    ✓ Input Shape correct? \(nextInputEmb.shape[1] == 1 ? "YES ([B, 1, dim])" : "❌ NO")")
-                    print(String(repeating: "=", count: 60) + "\n")
-
-                    // 🚨 INPUT CONSTRUCTION PROBE
-                    print("🚨 STEP 1 INPUT DIAGNOSTICS:")
-                    print(String(repeating: "=", count: 60))
-
-                    // 1. Check raw speech embedding (before position)
-                    let probeTokenArray = MLXArray([Int32(nextToken)]).reshaped([1, 1])
-                    let rawSpeechEmb = speechEmb(probeTokenArray)
-                    eval(rawSpeechEmb)
-
-                    let rawMean = rawSpeechEmb.mean().item(Float.self)
-                    let rawFirst5 = rawSpeechEmb[0, 0, 0..<5]
-                    eval(rawFirst5)
-
-                    print("  1. Raw Speech Embedding (token \(nextToken)):")
-                    print("     Mean: \(String(format: "%.8f", rawMean))")
-                    print("     First 5: \(rawFirst5.asArray(Float.self))")
-
-                    // 2. Check with position embedding added
-                    let withPos = rawSpeechEmb + speechPosEmb.getFixedEmbedding(step + 1)
-                    eval(withPos)
-                    let withPosMean = withPos.mean().item(Float.self)
-                    let withPosFirst5 = withPos[0, 0, 0..<5]
-                    eval(withPosFirst5)
-
-                    print("\n  2. With Position Embedding (pos=\(step + 1)):")
-                    print("     Mean: \(String(format: "%.8f", withPosMean))")
-                    print("     First 5: \(withPosFirst5.asArray(Float.self))")
-
-                    // 3. Check actual input (after CFG stacking)
-                    let actualMean = nextInputEmb.mean().item(Float.self)
-                    let actualB0First5 = nextInputEmb[0, 0, 0..<5]
-                    let actualB1First5 = nextInputEmb[1, 0, 0..<5]
-                    eval(actualB0First5, actualB1First5)
-
-                    print("\n  3. Actual Input (after CFG stacking):")
-                    print("     Mean: \(String(format: "%.8f", actualMean))")
-                    print("     Batch 0, first 5: \(actualB0First5.asArray(Float.self))")
-                    print("     Batch 1, first 5: \(actualB1First5.asArray(Float.self))")
-                    print(String(repeating: "=", count: 60) + "\n")
-                }
-
-                // Forward with cache (mask defaults to nil - CORRECT for incremental)
+                // Forward with cache (mask defaults to nil for incremental generation)
                 hidden = forward(nextInputEmb, cache: cache)
-                eval(hidden) // Force computation and clear graph
             }
         }
 

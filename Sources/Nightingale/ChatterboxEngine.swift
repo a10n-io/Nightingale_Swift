@@ -1355,48 +1355,29 @@ public actor ChatterboxEngine {
     // MARK: - Audio Generation (returns data instead of playing)
 
     public func generateAudio(_ text: String, temperature: Float = 0.0001) async throws -> [Float] {
-        print("DEBUG: generateAudio() called with text: \"\(text)\""); fflush(stdout)
         guard isLoaded else { throw ChatterboxError.modelNotLoaded }
         guard isVoiceLoaded else { throw ChatterboxError.voiceNotLoaded }
         guard let t3 = t3, let s3gen = s3gen, let t3Soul = t3Soul, let s3Soul = s3Soul,
               let t3CondTokens = t3CondTokens, let promptToken = promptToken, let promptFeat = promptFeat else {
             throw ChatterboxError.modelNotLoaded
         }
-        print("DEBUG: Guards passed"); fflush(stdout)
 
-        // Apply punctuation normalization (matches Python's punc_norm)
+        // Apply punctuation normalization
         let normalizedText = puncNorm(text)
-        print("DEBUG: Text after puncNorm: \"\(normalizedText)\""); fflush(stdout)
 
-        print("DEBUG: Tokenizing text..."); fflush(stdout)
         var tokens = tokenize(normalizedText)
 
-        // Prepend SOT (255) and append EOT (0) - matches Python's cross_validate_python.py
+        // Prepend SOT (255) and append EOT (0)
         tokens.insert(t3.config.startTextToken, at: 0)
         tokens.append(t3.config.stopTextToken)
 
-        print("DEBUG: Got \(tokens.count) tokens (with SOT/EOT)"); fflush(stdout)
-        print("DEBUG: Token values: \(tokens.prefix(20))... (showing first 20)"); fflush(stdout)
-        print("DEBUG: Python would produce 42 tokens: [255, 284, 18, 84, ...]"); fflush(stdout)
         let textTokens = MLXArray(tokens.map { Int32($0) }).expandedDimensions(axis: 0)
-        print("DEBUG: Created textTokens MLXArray: \(textTokens.shape)"); fflush(stdout)
 
         var currentCondTokens = t3CondTokens
         if !lastSpeechTokens.isEmpty {
             let suffix = lastSpeechTokens.suffix(150)
             currentCondTokens = MLXArray(suffix.map { Int32($0) }).expandedDimensions(axis: 0)
         }
-        print("DEBUG: currentCondTokens: \(currentCondTokens.shape)"); fflush(stdout)
-
-        // 🔬 CONDITIONING TOKENS DIAGNOSTIC
-        eval(currentCondTokens)
-        let condFlat = currentCondTokens.reshaped([-1])
-        let condFirst20 = condFlat[0..<min(20, condFlat.shape[0])]
-        eval(condFirst20)
-        print("🔬 Conditioning tokens [:20]: \(condFirst20.asArray(Int32.self))")
-        print("   Expected: [3782, 6486, 6405, 4218, 2031, 2922, 2203, 4814, 4813, 4850, 395, 395, 395, 638, 638, 638, 2582, 2582, 1520, 2031]")
-
-        print("DEBUG: Calling T3 generate..."); fflush(stdout)
         let t3Start = Date()
         // Use Python's exact defaults from mtl_tts.py generate() method
         // Python: max_new_tokens=1000, temperature=0.8, cfg_weight=0.5,
@@ -1413,40 +1394,14 @@ public actor ChatterboxEngine {
             minP: 0.05                 // Python: min_p=0.05
         )
         let t3Time = Date().timeIntervalSince(t3Start)
-        print("⏱️  T3 token generation: \(String(format: "%.2f", t3Time))s (\(speechTokens.count) tokens)"); fflush(stdout)
+        print("⏱️  T3 token generation: \(String(format: "%.2f", t3Time))s (\(speechTokens.count) tokens)")
 
-        // DIAGNOSTIC: Print first 20 tokens to check range
-        let first20 = Array(speechTokens.prefix(20))
-        print("🔍 First 20 speech tokens: \(first20)"); fflush(stdout)
-        if let minToken = speechTokens.min(), let maxToken = speechTokens.max() {
-            print("🔍 Token range: min=\(minToken), max=\(maxToken)"); fflush(stdout)
-        }
-
-        // Drop invalid tokens (SOS/EOS) - matches Python's drop_invalid_tokens
+        // Drop invalid tokens (SOS/EOS)
         let validTokens = T3Model.dropInvalidTokens(speechTokens)
-        print("DEBUG: After dropping SOS/EOS: \(validTokens.count) tokens (removed \(speechTokens.count - validTokens.count))"); fflush(stdout)
 
         GPU.clearCache()
-        print("DEBUG: GPU cache cleared"); fflush(stdout)
 
-        print("DEBUG: Converting speech tokens to MLXArray..."); fflush(stdout)
         let speechTokenArray = MLXArray(validTokens.map { Int32($0) }).expandedDimensions(axis: 0)
-        print("DEBUG: speechTokenArray: \(speechTokenArray.shape)"); fflush(stdout)
-
-        print("DEBUG: Calling S3Gen generate..."); fflush(stdout)
-
-        // 🔬 S3GEN INPUT DIAGNOSTICS
-        eval(s3Soul, promptToken, promptFeat)
-        print("🔬 S3GEN INPUT VERIFICATION:")
-        print("   S3 Soul shape: \(s3Soul.shape) ✅")
-        print("   Prompt Token shape: \(promptToken.shape)")
-        print("   Prompt Feat shape: \(promptFeat.shape)")
-        print("   Speech tokens count: \(validTokens.count)")
-
-        // Check for any nil or wrong shapes
-        if promptToken.shape[0] == 0 || promptFeat.shape[0] == 0 {
-            print("❌ WARNING: Prompt token or feat is empty!")
-        }
 
         let s3Start = Date()
         let audio = s3gen.generate(
@@ -1457,20 +1412,16 @@ public actor ChatterboxEngine {
             promptFeat: promptFeat
         )
         let s3Time = Date().timeIntervalSince(s3Start)
-        print("⏱️  S3Gen audio synthesis: \(String(format: "%.2f", s3Time))s"); fflush(stdout)
+        print("⏱️  S3Gen audio synthesis: \(String(format: "%.2f", s3Time))s")
 
-        print("DEBUG: Evaluating audio..."); fflush(stdout)
         eval(audio)
-        print("DEBUG: Audio evaluated"); fflush(stdout)
 
         lastSpeechTokens.append(contentsOf: validTokens)
         if lastSpeechTokens.count > 500 {
             lastSpeechTokens = Array(lastSpeechTokens.suffix(500))
         }
 
-        print("DEBUG: Converting to Float array..."); fflush(stdout)
         let result = audio.asArray(Float.self)
-        print("DEBUG: Conversion complete, returning \(result.count) samples"); fflush(stdout)
         return result
     }
 
