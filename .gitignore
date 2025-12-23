@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude
+.claude/
+
+# Xcode / Swift
+.build/
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+*.swiftpm
+.swiftpm/
+
+# Build artifacts
+*.o
+*.a
+*.dylib
+*.dSYM.zip
+*.dSYM
+
+# Test outputs
+test_audio/
+verification_outputs/
+
+# Model files (large - too big for GitHub, use Git LFS or download separately)
+models/
+baked_voices/
+
+# Large compiled Metal library
+default.metallib

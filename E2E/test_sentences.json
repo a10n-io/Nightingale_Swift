@@ -1,0 +1,26 @@
+[
+  {
+    "id": "expressive_surprise",
+    "description": "Expressiveness / Emotion",
+    "text_en": "Wow! I absolutely cannot believe that it worked on the first try!",
+    "text_nl": "Wauw! Ik kan absoluut niet geloven dat het in één keer werkte!"
+  },
+  {
+    "id": "narrative_flow",
+    "description": "Length / Pacing",
+    "text_en": "Even though the journey was long and difficult, they kept walking, hoping to find a place where the stars shine brighter.",
+    "text_nl": "Hoewel de reis lang en moeilijk was, bleven ze lopen, in de hoop een plek te vinden waar de sterren helderder schijnen."
+  },
+  {
+    "id": "interrogative",
+    "description": "Intonation / Question",
+    "text_en": "Do you think the model can handle the rising intonation at the end of this sentence?",
+    "text_nl": "Denk je dat het model de stijgende intonatie aan het einde van deze zin aankan?"
+  },
+  {
+    "id": "technical_status",
+    "description": "Technical / Articulation",
+    "text_en": "Verification protocol initialized. Loading sequence 54-B.",
+    "text_nl": "Verificatieprotocol geïnitialiseerd. Sequentie 54-B wordt geladen."
+  }
+]

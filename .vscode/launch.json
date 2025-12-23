@@ -1,0 +1,64 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug GenerateAudio",
+            "target": "GenerateAudio",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug GenerateAudio"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release GenerateAudio",
+            "target": "GenerateAudio",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release GenerateAudio"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug CrossValidate",
+            "target": "CrossValidate",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug CrossValidate"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release CrossValidate",
+            "target": "CrossValidate",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release CrossValidate"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug GenerateTestSentences",
+            "target": "GenerateTestSentences",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug GenerateTestSentences"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release GenerateTestSentences",
+            "target": "GenerateTestSentences",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release GenerateTestSentences"
+        }
+    ]
+}
