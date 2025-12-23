@@ -3008,7 +3008,7 @@ public class S3Gen: Module {
         let mask = MLXArray.ones([1, 1, L_total], dtype: muT.dtype)
 
         // ODE Parameters
-        let nTimesteps = 10
+        let nTimesteps = 8  // Reduced from 10 for ~20% speedup with minimal quality impact
         let cfgRate: Float = 0.7  // Match Python decoder CFG
 
         // Cosine time scheduling
@@ -3103,7 +3103,7 @@ public class S3Gen: Module {
         let mask = MLXArray.ones([1, 1, L_total])
 
         // ODE Parameters
-        let nTimesteps = 10
+        let nTimesteps = 8  // Reduced from 10 for ~20% speedup with minimal quality impact
         let cfgRate: Float = 0.7  // Match Python decoder CFG
 
         // Cosine time scheduling
