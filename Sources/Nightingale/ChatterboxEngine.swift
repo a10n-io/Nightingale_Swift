@@ -1397,6 +1397,7 @@ public actor ChatterboxEngine {
         print("   Expected: [3782, 6486, 6405, 4218, 2031, 2922, 2203, 4814, 4813, 4850, 395, 395, 395, 638, 638, 638, 2582, 2582, 1520, 2031]")
 
         print("DEBUG: Calling T3 generate..."); fflush(stdout)
+        let t3Start = Date()
         // Use Python's exact defaults from mtl_tts.py generate() method
         // Python: max_new_tokens=1000, temperature=0.8, cfg_weight=0.5,
         //         repetition_penalty=2.0, top_p=1.0, min_p=0.05
@@ -1411,7 +1412,8 @@ public actor ChatterboxEngine {
             topP: 1.0,                 // Python: top_p=1.0
             minP: 0.05                 // Python: min_p=0.05
         )
-        print("DEBUG: T3 generate returned \(speechTokens.count) speech tokens"); fflush(stdout)
+        let t3Time = Date().timeIntervalSince(t3Start)
+        print("⏱️  T3 token generation: \(String(format: "%.2f", t3Time))s (\(speechTokens.count) tokens)"); fflush(stdout)
 
         // DIAGNOSTIC: Print first 20 tokens to check range
         let first20 = Array(speechTokens.prefix(20))
@@ -1446,6 +1448,7 @@ public actor ChatterboxEngine {
             print("❌ WARNING: Prompt token or feat is empty!")
         }
 
+        let s3Start = Date()
         let audio = s3gen.generate(
             tokens: speechTokenArray,
             speakerEmb: t3Soul,           // [1, 256] speaker embedding for decoder finalize
@@ -1453,7 +1456,8 @@ public actor ChatterboxEngine {
             promptToken: promptToken,
             promptFeat: promptFeat
         )
-        print("DEBUG: S3Gen generate returned, audio shape: \(audio.shape)"); fflush(stdout)
+        let s3Time = Date().timeIntervalSince(s3Start)
+        print("⏱️  S3Gen audio synthesis: \(String(format: "%.2f", s3Time))s"); fflush(stdout)
 
         print("DEBUG: Evaluating audio..."); fflush(stdout)
         eval(audio)

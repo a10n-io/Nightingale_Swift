@@ -59,6 +59,26 @@
             "target": "GenerateTestSentences",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release GenerateTestSentences"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug TTSServer",
+            "target": "TTSServer",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug TTSServer"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release TTSServer",
+            "target": "TTSServer",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release TTSServer"
         }
     ]
 }

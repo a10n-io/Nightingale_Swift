@@ -268,52 +268,12 @@ public class Attention: Module {
             print("   K [:5]: \(k_0_pre.asArray(Float.self))")
         }
 
-        // DEBUG: Log offset every 10 steps and around the suspected freeze point (frame 70-90)
-        let shouldLog = (offset % 10 == 0) || (offset >= 70 && offset <= 90)
-        if shouldLog {
-            print("🔍 RoPE offset=\(offset), seqLen=\(L)")
-        }
-
         queries = rope(queries, offset: offset)
         keys = rope(keys, offset: offset)
 
-        // 🔬 ROPE DIAGNOSTIC: Check Q, K after RoPE
-        if offset == 0 && L == 80 {
-            eval(queries, keys)
-            let q_post = queries[0, 0, L-1, 0..<5]
-            let k_post = keys[0, 0, L-1, 0..<5]
-            let k_0_post = keys[0, 0, 0, 0..<5]  // CRITICAL: Check position 0 too!
-            eval(q_post, k_post, k_0_post)
-            print("\n🔬 POST-ROPE (Batch 0, Head 0, Last Token [79]):")
-            print("   Q [:5]: \(q_post.asArray(Float.self))")
-            print("   K [:5]: \(k_post.asArray(Float.self))")
-            print("\n🔬 POST-ROPE (Batch 0, Head 0, First Token [0]):")
-            print("   K [:5]: \(k_0_post.asArray(Float.self))")
-        }
-
         // Update cache
         if let cache = cache {
-            let oldOffset = cache.offset
-            let keysShapeBefore = keys.shape
             (keys, values) = cache.update(keys: keys, values: values)
-            let newOffset = cache.offset
-            let keysShapeAfter = keys.shape
-
-            if shouldLog {
-                print("🔍 KV cache: oldOffset=\(oldOffset) → newOffset=\(newOffset) (delta=\(newOffset - oldOffset))")
-            }
-
-            // DEBUG: For step 1 (first incremental token), verify cache is working
-            if oldOffset == 80 && L == 1 {
-                eval(keys, values)
-                print("\n🔬 STEP 1 KV CACHE DEBUG:")
-                print("   Keys shape BEFORE cache.update: \(keysShapeBefore)")
-                print("   Keys shape AFTER cache.update: \(keysShapeAfter)")
-                print("   Values shape AFTER cache.update: \(values.shape)")
-                print("   Expected keys/values shape: [2, 16, 81, 64] (80 cached + 1 new)")
-                print("   Cache offset: \(oldOffset) → \(newOffset)")
-                print("   ✅ Cache is concatenating if seqLen went from 1 to 81")
-            }
         }
 
         // Repeat KV heads if needed (GQA)
@@ -1076,8 +1036,6 @@ public class T3Model: Module {
         cache: [KVCache]? = nil,
         mask: MLXArray? = nil
     ) -> MLXArray {
-        print("⭐️ T3Model.forward() CALLED - embeddings.shape=\(embeddings.shape)")
-
         var h = embeddings
 
         // Check if this is the initial forward pass (cache offset = 0 or nil)
@@ -1100,7 +1058,6 @@ public class T3Model: Module {
             // DEBUG: Capture Layer 0 output for BOTH initial and incremental passes
             if i == 0 {
                 let currentOffset = cacheOffset
-                print("DEBUG: Layer 0 processed, cacheOffset=\(currentOffset), isInitialPass=\(isInitialPass)")
 
                 // 🔍 NEW: Debug incremental pass (Step 1)
                 if currentOffset == 80 {
@@ -1170,9 +1127,6 @@ public class T3Model: Module {
             }
 
             // DEBUG: Capture Layer 15 output (index 14) for binary search
-            if i == 14 {
-                print("DEBUG: Reached Layer 14 (Layer 15), isInitialPass=\(isInitialPass), cacheOffset=\(cacheOffset)")
-            }
             if i == 14 && isInitialPass {
                 eval(h)  // Force computation
                 print("\n" + String(repeating: "=", count: 60))
@@ -1971,40 +1925,33 @@ public class T3Model: Module {
                     clearCapturedAttention()
                 }
 
-                // DEBUG: Print top logits for first 5 steps to compare with Python
-                if step < 5 {
-                    let logitsArray = logitsFlat.asArray(Float.self)
-                    // Find top 5 tokens by logit value
-                    var topK = logitsArray.enumerated().map { ($0.offset, $0.element) }
-                    topK.sort { $0.1 > $1.1 }
-                    let top5 = topK.prefix(5)
-                    print("DEBUG LOGITS step=\(step): top5=[\(top5.map { "(\($0.0): \(String(format: "%.2f", $0.1)))" }.joined(separator: ", "))]")
-                    // Check EOS probability
-                    let eosLogit = logitsArray[stopSpeechToken]
-                    print("DEBUG LOGITS step=\(step): EOS(6562) logit=\(String(format: "%.2f", eosLogit))")
-                }
-
                 // Apply repetition penalty to previously generated tokens
                 if repetitionPenalty != 1.0 && !generatedTokens.isEmpty {
-                    // Get unique tokens that have been generated
-                    let uniqueTokens = Set(generatedTokens)
-                    for token in uniqueTokens {
-                        if token < logitsFlat.shape[0] {
-                            let currentLogit = logitsFlat[token].item(Float.self)
-                            // Divide positive logits, multiply negative logits by penalty
-                            let penalizedLogit = currentLogit > 0
-                                ? currentLogit / repetitionPenalty
-                                : currentLogit * repetitionPenalty
-                            // Create new array with penalized value
-                            let indices = MLXArray([Int32(token)])
-                            let values = MLXArray([penalizedLogit])
-                            // Manual update since MLX doesn't have scatter
-                            var logitsArray = logitsFlat.asArray(Float.self)
-                            logitsArray[token] = penalizedLogit
-                            logitsFlat = MLXArray(logitsArray)
+                    // Get unique tokens - filter to vocab size
+                    let uniqueTokens = Array(Set(generatedTokens).filter { $0 < logitsFlat.shape[0] })
+                    if !uniqueTokens.isEmpty {
+                        // Create index array for all tokens at once
+                        let tokenIndices = MLXArray(uniqueTokens.map { Int32($0) })
+
+                        // Get all logits for generated tokens at once
+                        let selectedLogits = logitsFlat[tokenIndices]
+
+                        // Apply penalty using MLX operations: if logit > 0, divide, else multiply
+                        let penalty = MLXArray(repetitionPenalty)
+                        let penalizedLogits = `where`(
+                            selectedLogits .> 0,
+                            selectedLogits / penalty,
+                            selectedLogits * penalty
+                        )
+
+                        // Update logits (single array conversion instead of per-token)
+                        var logitsArray = logitsFlat.asArray(Float.self)
+                        let penalizedArray = penalizedLogits.asArray(Float.self)
+                        for (i, token) in uniqueTokens.enumerated() {
+                            logitsArray[token] = penalizedArray[i]
                         }
+                        logitsFlat = MLXArray(logitsArray)
                     }
-                    eval(logitsFlat)
                 }
 
                 // IMPORTANT: Python does NOT mask invalid tokens during generation
@@ -2082,9 +2029,6 @@ public class T3Model: Module {
 
                 return nextToken
             }
-
-            // 🔍 COMPREHENSIVE TOKEN STREAM DEBUG
-            print("Step \(step): Input \(currentToken) -> Output \(nextToken)")
 
             // Progress logging every 10 tokens
             if step % 10 == 0 {

@@ -190,18 +190,6 @@ public class AlignmentStreamAnalyzer {
         eval(rawLastRow)
         let curTextPosn = Int(argMax(rawLastRow, axis: -1).item(Int32.self))
 
-        // DEBUG: Check attention matrix shape and argMax behavior
-        if currFramePos % 10 == 0 || currFramePos < 5 {
-            let lastRow = A[(T-1)..<T, 0...]  // Masked for comparison
-            eval(A); eval(lastRow)
-            let maskedPeak = Int(argMax(lastRow, axis: -1).item(Int32.self))
-            let rawMaxAttn = Float(rawLastRow.max().item(Float.self))
-            print("🔍 DEBUG Analyzer frame=\(currFramePos):")
-            print("   curTextPosn=\(curTextPosn) (raw argmax), maskedPeak=\(maskedPeak)")
-            print("   rawMaxAttn=\(String(format: "%.4f", rawMaxAttn))")
-            print("   textPosition=\(textPosition), delta=\(curTextPosn - textPosition)")
-        }
-
         // Detect discontinuity (jumping too far in text) - more lenient range
         // Allow larger forward jumps since attention can skip ahead
         let discontinuity = !(-4 < curTextPosn - textPosition && curTextPosn - textPosition < 15)
@@ -240,12 +228,6 @@ public class AlignmentStreamAnalyzer {
         if !complete && textPosition >= S - 3 {
             complete = true
             completedAt = T
-            print("DEBUG Analyzer: Marking COMPLETE at frame \(T), textPosition=\(textPosition), S=\(S)")
-        }
-
-        // Debug output every 5 frames
-        if currFramePos % 5 == 0 || currFramePos < 3 {
-            print("DEBUG Analyzer: frame=\(currFramePos), textPos=\(textPosition), S=\(S), started=\(started), complete=\(complete)")
         }
 
         // Long tail detection: hallucinations at the end
