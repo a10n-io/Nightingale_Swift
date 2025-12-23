@@ -1687,17 +1687,6 @@ public class T3Model: Module {
         var generatedTokens: [Int] = [currentToken]
 
         for step in 0..<maxTokens {
-            // 🔬 STEP 1 INPUT VERIFICATION
-            if step == 1 {
-                print("\n🔬 STEP 1 BEGINS:")
-                print("   Input token (from Step 0): \(currentToken)")
-                print("   Speech position: \(step + 1) (will be 2)")
-                if !cache.isEmpty {
-                    print("   KV cache[0] offset: \(cache[0].offset)")
-                    print("   ✅ Cache should be at offset 81 (initial 80 + 1 generated)")
-                }
-            }
-
             // CRITICAL: Wrap in autoreleasepool to prevent memory graph buildup
             let nextToken: Int = autoreleasepool {
                 // Get logits for last position - get last token's hidden state
@@ -1801,7 +1790,6 @@ public class T3Model: Module {
                 } else {
                     // Apply temperature scaling
                     let scaledLogits = logitsFlat / MLXArray(temperature)
-                    eval(scaledLogits)
 
                 // ============================================
                 // TOP-P (NUCLEUS) SAMPLING + MIN-P
@@ -1888,17 +1876,6 @@ public class T3Model: Module {
 
                 // Forward with cache (mask defaults to nil for incremental generation)
                 hidden = forward(nextInputEmb, cache: cache)
-            }
-        }
-
-        print("T3: Generation complete, \(generatedTokens.count) tokens")
-        print("   All tokens: \(generatedTokens)")
-
-        // Check for repetition patterns
-        if generatedTokens.count >= 3 {
-            let last3 = Array(generatedTokens.suffix(3))
-            if last3[0] == last3[1] && last3[1] == last3[2] {
-                print("   ⚠️ Detected 3-token repetition: \(last3)")
             }
         }
 

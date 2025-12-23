@@ -3023,6 +3023,11 @@ public class S3Gen: Module {
         var currentT = tSpan[0]
         var dt = tSpan[1] - tSpan[0]
 
+        // Pre-allocate zero tensors for CFG (reused in loop for efficiency)
+        let zeroMu = MLXArray.zeros(like: muT)
+        let zeroSpk = MLXArray.zeros(like: spkCond)
+        let zeroCond = MLXArray.zeros(like: condsT)
+
         for step in 1...nTimesteps {
             let t = MLXArray([currentT])
 
@@ -3030,9 +3035,9 @@ public class S3Gen: Module {
             // Prepare batch for CFG: [Cond, Uncond]
             let xIn = concatenated([xt, xt], axis: 0)
             let maskIn = concatenated([mask, mask], axis: 0)
-            let muIn = concatenated([muT, MLXArray.zeros(like: muT)], axis: 0)
-            let spkIn = concatenated([spkCond, MLXArray.zeros(like: spkCond)], axis: 0)
-            let condIn = concatenated([condsT, MLXArray.zeros(like: condsT)], axis: 0)
+            let muIn = concatenated([muT, zeroMu], axis: 0)
+            let spkIn = concatenated([spkCond, zeroSpk], axis: 0)
+            let condIn = concatenated([condsT, zeroCond], axis: 0)
             let tIn = concatenated([t, t], axis: 0)
 
             // Forward pass (Batch=2)
