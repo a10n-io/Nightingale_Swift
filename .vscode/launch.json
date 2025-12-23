@@ -79,6 +79,126 @@
             "target": "TTSServer",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release TTSServer"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug TTSServerQuantized",
+            "target": "TTSServerQuantized",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug TTSServerQuantized"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release TTSServerQuantized",
+            "target": "TTSServerQuantized",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release TTSServerQuantized"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug QuantizeAndSave",
+            "target": "QuantizeAndSave",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug QuantizeAndSave"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release QuantizeAndSave",
+            "target": "QuantizeAndSave",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release QuantizeAndSave"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug StreamingProfile",
+            "target": "StreamingProfile",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug StreamingProfile"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release StreamingProfile",
+            "target": "StreamingProfile",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release StreamingProfile"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug StreamingTest",
+            "target": "StreamingTest",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug StreamingTest"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release StreamingTest",
+            "target": "StreamingTest",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release StreamingTest"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug StreamingBenchmark",
+            "target": "StreamingBenchmark",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug StreamingBenchmark"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release StreamingBenchmark",
+            "target": "StreamingBenchmark",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release StreamingBenchmark"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug EarlyPlayback",
+            "target": "EarlyPlayback",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug EarlyPlayback"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release EarlyPlayback",
+            "target": "EarlyPlayback",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release EarlyPlayback"
         }
     ]
 }

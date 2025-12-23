@@ -107,8 +107,15 @@ public actor ChatterboxEngine {
     // MARK: - Model Loading
 
     /// Load the T3 and S3Gen models from the app bundle or specified URL
-    public func loadModels(from bundle: Bundle = .main, modelsURL: URL? = nil) async throws {
+    /// - Parameters:
+    ///   - bundle: Bundle containing models (default: .main)
+    ///   - modelsURL: Optional URL to models directory
+    ///   - useQuantization: Whether to use INT8 quantization for faster inference (default: false)
+    public func loadModels(from bundle: Bundle = .main, modelsURL: URL? = nil, useQuantization: Bool = false) async throws {
         print("Loading Chatterbox models...")
+        if useQuantization {
+            print("⚡️ INT8 quantization enabled (1.5-2x speedup expected)")
+        }
 
         // Set GPU cache limit (256MB is optimal for MLX)
         let cacheLimitMB = 256
@@ -149,9 +156,18 @@ public actor ChatterboxEngine {
         // Python multilingual: t3_mtl23ls_v2.safetensors
         // Python English: t3_cfg.safetensors
         // Fallback: t3_fp32.safetensors (MLX converted), model.safetensors (quantized)
-        let t3WeightFiles = isMultilingual
-            ? ["t3_mtl23ls_v2.safetensors", "t3_fp32.safetensors", "model.safetensors"]
-            : ["t3_cfg.safetensors", "t3_fp32.safetensors", "model.safetensors"]
+        // When useQuantization is enabled, prefer pre-quantized INT8 weights
+        let t3WeightFiles: [String]
+        if useQuantization {
+            // Prefer pre-quantized INT8 weights for faster loading
+            t3WeightFiles = isMultilingual
+                ? ["t3_mtl23ls_v2_int8.safetensors", "t3_mtl23ls_v2.safetensors", "t3_fp32.safetensors"]
+                : ["t3_cfg_int8.safetensors", "t3_cfg.safetensors", "t3_fp32.safetensors"]
+        } else {
+            t3WeightFiles = isMultilingual
+                ? ["t3_mtl23ls_v2.safetensors", "t3_fp32.safetensors", "model.safetensors"]
+                : ["t3_cfg.safetensors", "t3_fp32.safetensors", "model.safetensors"]
+        }
 
         // RoPE frequencies can be in modelDir or parent mlx/ dir
         let ropeFreqsURL: URL?
@@ -170,10 +186,12 @@ public actor ChatterboxEngine {
 
         // Find T3 and S3Gen weight files
         var t3WeightsURL: URL? = nil
+        var loadedPreQuantizedT3 = false
         for filename in t3WeightFiles {
             let url = modelDir.appendingPathComponent(filename)
             if FileManager.default.fileExists(atPath: url.path) {
                 t3WeightsURL = url
+                loadedPreQuantizedT3 = filename.contains("_int8")
                 break
             }
         }
@@ -577,6 +595,61 @@ public actor ChatterboxEngine {
             print("Tokenizer loaded: \(vocab?.count ?? 0) tokens, \(merges.count) BPE merges")
         } else {
             print("Warning: Tokenizer file not found: \(tokenizerURL.lastPathComponent)")
+        }
+
+        // Apply INT8 quantization if requested (skip if we loaded pre-quantized weights)
+        if useQuantization && !loadedPreQuantizedT3 {
+            print("\n⚡️ Applying runtime INT8 quantization...")
+            let quantStart = Date()
+
+            let groupSize = 64
+
+            // Quantize T3Model only (95% of generation time)
+            // Skip S3Gen to preserve voice expressiveness
+            if let t3 = self.t3 {
+                print("  Quantizing T3Model (transformer attention & MLP layers)...")
+                print("  Note: Preserving embeddings and small layers for quality & multilingual support")
+
+                var quantizedCount = 0
+                MLXNN.quantize(model: t3, groupSize: groupSize, bits: 8) { path, module in
+                    // Only quantize specific transformer layer paths
+                    // These are known to have @ModuleInfo wrappers and correct shapes
+                    if module is Linear {
+                        // Quantize attention projections (Q/K/V/O)
+                        if path.contains("selfAttn") && (
+                            path.hasSuffix("qProj") ||
+                            path.hasSuffix("kProj") ||
+                            path.hasSuffix("vProj") ||
+                            path.hasSuffix("oProj")
+                        ) {
+                            quantizedCount += 1
+                            return true
+                        }
+
+                        // Quantize MLP projections (gate/up/down)
+                        if path.contains("mlp") && (
+                            path.hasSuffix("gateProj") ||
+                            path.hasSuffix("upProj") ||
+                            path.hasSuffix("downProj")
+                        ) {
+                            quantizedCount += 1
+                            return true
+                        }
+                    }
+                    return false
+                }
+                print("  ✅ T3Model quantized (\(quantizedCount) layers converted to INT8)")
+            }
+
+            // Skip S3Gen quantization - preserves voice expressiveness
+            print("  ℹ️  S3Gen kept at FP16 (preserves voice expressiveness)")
+
+            let quantTime = Date().timeIntervalSince(quantStart)
+            print("⚡️ Runtime quantization complete in \(String(format: "%.2f", quantTime))s")
+            print("   Expected speedup: 1.4-1.8x (T3 attention & MLP)")
+        } else if useQuantization && loadedPreQuantizedT3 {
+            print("\n⚡️ Using pre-quantized INT8 weights (no runtime quantization needed)")
+            print("   Expected speedup: 1.4-1.8x (T3 attention & MLP)")
         }
 
         isLoaded = true

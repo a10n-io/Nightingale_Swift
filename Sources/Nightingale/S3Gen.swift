@@ -152,8 +152,8 @@ public class Snake: Module, UnaryLayer {
 }
 
 public class TimeMLP: Module {
-    public let linear1: FixedLinear
-    public let linear2: FixedLinear
+    @ModuleInfo public var linear1: FixedLinear
+    @ModuleInfo public var linear2: FixedLinear
     let inputDim: Int
 
     public static var debugEnabled: Bool = false
@@ -262,10 +262,10 @@ public class FlowMLP: Module {
 }
 
 public class MultiHeadAttention: Module {
-    public let queryProj: FixedLinear
-    public let keyProj: FixedLinear
-    public let valueProj: FixedLinear
-    public let outProj: FixedLinear
+    @ModuleInfo public var queryProj: FixedLinear
+    @ModuleInfo public var keyProj: FixedLinear
+    @ModuleInfo public var valueProj: FixedLinear
+    @ModuleInfo public var outProj: FixedLinear
     public let numHeads: Int
     public let headDim: Int
     public let scale: Float
@@ -422,8 +422,8 @@ public class PreLookahead: Module {
 
 // Reusing FlowTransformerBlock logic but renamed for clarity/mapping
 public class S3ConformerFeedForward: Module {
-    public let w1: FixedLinear  // Made public for debugging
-    public let w2: FixedLinear  // Made public for debugging
+    @ModuleInfo public var w1: FixedLinear
+    @ModuleInfo public var w2: FixedLinear
 
     public init(dim: Int, mult: Int = 4, dropout: Float = 0.1) {
         // Python PositionwiseFeedForward: w_1 -> act -> dropout -> w_2
@@ -566,13 +566,13 @@ public class ConformerBlock: Module {
 
 public class UpsampleEncoder: Module {
     // Embed
-    public let embedLinear: FixedLinear
+    @ModuleInfo public var embedLinear: FixedLinear
     public let embedNorm: LayerNorm // Added missing Norm
     public let posEnc: EspnetRelPositionalEncoding
     public let preLookaheadLayer: Module  // Can be PreLookahead or PreLookaheadLayer
     public let encoders: [ConformerBlock]
     public let upLayer: Upsample1D
-    public let upEmbedLinear: FixedLinear
+    @ModuleInfo public var upEmbedLinear: FixedLinear
     public let upEmbedNorm: LayerNorm // Added missing Norm
     public let upPosEnc: EspnetRelPositionalEncoding
     public let upEncoders: [ConformerBlock]
@@ -938,7 +938,7 @@ public class CausalBlock1D: Module {
 public class CausalResNetBlock: Module {
     public let block1: CausalBlock1D
     public let block2: CausalBlock1D
-    public let mlpLinear: FixedLinear
+    @ModuleInfo public var mlpLinear: FixedLinear
     public let resConv: Conv1d  // Use regular Conv1d like Python (not CausalConv1d)
 
     public init(dim: Int, dimOut: Int, timeEmbDim: Int) {
@@ -1871,8 +1871,8 @@ public class SineGen: Module {
 
 public class SourceModuleHnNSF: Module {
     public let sineGen: SineGen
-    public let linear: FixedLinear
-    
+    @ModuleInfo public var linear: FixedLinear
+
     public init(samplingRate: Int, harmonicNum: Int = 8, sineAmp: Float = 0.1, noiseStd: Float = 0.003) {
         self.sineGen = SineGen(samplingRate: Float(samplingRate), harmonicNum: harmonicNum, sineAmp: sineAmp, noiseStd: noiseStd)
         self.linear = FixedLinear(harmonicNum + 1, 1, name: "SourceModuleHnNSF.linear") // H+1 inputs -> 1 output
@@ -2359,8 +2359,8 @@ public class Mel2Wav: Module {
 public class S3Gen: Module {
     public let inputEmbedding: Embedding
     public let encoder: UpsampleEncoder  // Using UpsampleEncoder (matches Python's UpsampleConformerEncoder)
-    public let encoderProj: FixedLinear
-    public let spkEmbedAffine: FixedLinear
+    @ModuleInfo public var encoderProj: FixedLinear
+    @ModuleInfo public var spkEmbedAffine: FixedLinear
     public let decoder: FlowMatchingDecoder
     public let vocoder: Mel2Wav
 

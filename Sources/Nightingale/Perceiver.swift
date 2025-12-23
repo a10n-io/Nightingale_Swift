@@ -11,10 +11,10 @@ public class PerceiverAttention: Module {
     public let scale: Float
 
     public let norm: LayerNorm
-    public let toQ: Linear
-    public let toK: Linear
-    public let toV: Linear
-    public let projOut: Linear
+    @ModuleInfo public var toQ: Linear
+    @ModuleInfo public var toK: Linear
+    @ModuleInfo public var toV: Linear
+    @ModuleInfo public var projOut: Linear
 
     public init(channels: Int, numHeads: Int = 4, weights: [String: MLXArray], prefix: String) {
         self.numHeads = numHeads

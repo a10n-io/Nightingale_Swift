@@ -26,10 +26,16 @@ public enum LinearFactory {
     ) -> Linear {
         let weightKey = "\(name).weight"
 
-        // Check for quantization keys (created by mx.quantize with group_size=64, bits=4)
+        // Check for quantization keys - support both formats:
+        // Format 1 (Q4): {name}.weight_scales, {name}.weight_biases
+        // Format 2 (INT8): {name}.scales, {name}.biases
         let hasQ4Weights = weights["\(weightKey)_scales"] != nil &&
                            weights["\(weightKey)_biases"] != nil &&
                            weights[weightKey] != nil
+
+        let hasINT8Weights = weights["\(name).scales"] != nil &&
+                             weights["\(name).biases"] != nil &&
+                             weights[weightKey] != nil
 
         // If forceFP16 is requested but only Q4 weights exist, dequantize them
         if forceFP16 && hasQ4Weights {
@@ -94,6 +100,38 @@ public enum LinearFactory {
             return qLinear
         }
 
+        // Load INT8 quantized weights (format 2: {name}.scales, {name}.biases)
+        if !forceFP16 && hasINT8Weights {
+            guard let scales = weights["\(name).scales"],
+                  let biases = weights["\(name).biases"],
+                  let packedWeight = weights[weightKey] else {
+                fatalError("Missing INT8 weights for \(name)")
+            }
+
+            print("  [INT8] Loading quantized: \(name)")
+
+            // Create QuantizedLinear for INT8
+            let qLinear = QuantizedLinear(
+                inputDim,
+                outputDim,
+                bias: bias,
+                groupSize: 64,
+                bits: 8
+            )
+
+            var params: [String: MLXArray] = [
+                "weight": packedWeight,
+                "scales": scales,
+                "biases": biases
+            ]
+            if bias, let b = weights["\(name).bias"] {
+                params["bias"] = b
+            }
+            qLinear.update(parameters: ModuleParameters.unflattened(params))
+
+            return qLinear
+        }
+
         // Fallback: Standard FP16 Linear
         let linear = Linear(inputDim, outputDim, bias: bias)
 
@@ -129,7 +167,10 @@ public enum LinearFactory {
     /// Check if a given layer name has quantized weights in the dictionary
     public static func isQuantized(_ name: String, in weights: [String: MLXArray]) -> Bool {
         let weightKey = "\(name).weight"
-        return weights["\(weightKey)_scales"] != nil && weights["\(weightKey)_biases"] != nil
+        // Check both Q4 format ({name}.weight_scales) and INT8 format ({name}.scales)
+        let hasQ4 = weights["\(weightKey)_scales"] != nil && weights["\(weightKey)_biases"] != nil
+        let hasINT8 = weights["\(name).scales"] != nil && weights["\(name).biases"] != nil
+        return hasQ4 || hasINT8
     }
 
     /// Get statistics about quantized vs FP16 layers in a weights dictionary

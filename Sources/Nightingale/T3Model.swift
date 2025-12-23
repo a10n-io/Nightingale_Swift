@@ -189,10 +189,10 @@ public class Attention: Module {
     let headDim: Int
     let scale: Float
 
-    public let qProj: Linear
-    public let kProj: Linear
-    public let vProj: Linear
-    public let oProj: Linear
+    @ModuleInfo public var qProj: Linear
+    @ModuleInfo public var kProj: Linear
+    @ModuleInfo public var vProj: Linear
+    @ModuleInfo public var oProj: Linear
     public let rope: RoPE
 
     /// Initialize with weights dictionary for quantized loading
@@ -430,10 +430,10 @@ public class InspectableAttention: Module {
     let scale: Float
     let layerIdx: Int
 
-    public let qProj: Linear
-    public let kProj: Linear
-    public let vProj: Linear
-    public let oProj: Linear
+    @ModuleInfo public var qProj: Linear
+    @ModuleInfo public var kProj: Linear
+    @ModuleInfo public var vProj: Linear
+    @ModuleInfo public var oProj: Linear
     public let rope: RoPE
 
     /// Last captured attention weights [B, nHeads, T_q, T_kv]
@@ -568,9 +568,9 @@ public class InspectableAttention: Module {
 // MARK: - MLP
 
 public class MLP: Module {
-    let gateProj: Linear
-    let upProj: Linear
-    let downProj: Linear
+    @ModuleInfo public var gateProj: Linear
+    @ModuleInfo public var upProj: Linear
+    @ModuleInfo public var downProj: Linear
 
     /// Initialize with weights dictionary for quantized loading
     public init(config: T3Config, layerPrefix: String, weights: [String: MLXArray]) {
@@ -863,12 +863,12 @@ public class T3Model: Module {
     public let speechPosEmb: LearnedPositionEmbeddings
 
     // Output heads
-    public let speechHead: Linear
+    @ModuleInfo public var speechHead: Linear
 
     // Conditioning encoder (T3CondEnc equivalent)
-    public let speakerProj: Linear      // Projects 256-dim speaker embedding to model hidden size
+    @ModuleInfo public var speakerProj: Linear      // Projects 256-dim speaker embedding to model hidden size
     public let perceiver: Perceiver?    // Compresses 150 speech tokens to 32 tokens
-    public let emotionAdvFC: Linear?    // Emotion adversarial conditioning (1 -> 1024)
+    @ModuleInfo public var emotionAdvFC: Linear?    // Emotion adversarial conditioning (1 -> 1024)
 
     // Special tokens
     public let startSpeechToken: Int = 6561  // Fixed: was 6560 (incorrect)
@@ -992,13 +992,18 @@ public class T3Model: Module {
         // Emotion adversarial conditioning
         if let emotionWeight = weights["emotionAdvFC.weight"] {
             self.emotionAdvFC = Linear(1, config.hiddenSize, bias: false)
-            self.emotionAdvFC!.update(parameters: ModuleParameters.unflattened(["weight": emotionWeight]))
-            print("  Loaded emotionAdvFC.weight")
         } else {
             self.emotionAdvFC = nil
         }
 
         super.init()
+
+        // Load emotionAdvFC weights after super.init()
+        if let emotionWeight = weights["emotionAdvFC.weight"] {
+            self.emotionAdvFC!.update(parameters: ModuleParameters.unflattened(["weight": emotionWeight]))
+            print("  Loaded emotionAdvFC.weight")
+        }
+
         self.train(false) // Set eval mode
         print("T3Model: Initialization complete")
     }

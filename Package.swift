@@ -28,6 +28,30 @@ let package = Package(
             name: "TTSServer",
             targets: ["TTSServer"]
         ),
+        .executable(
+            name: "TTSServerQuantized",
+            targets: ["TTSServerQuantized"]
+        ),
+        .executable(
+            name: "QuantizeAndSave",
+            targets: ["QuantizeAndSave"]
+        ),
+        .executable(
+            name: "StreamingProfile",
+            targets: ["StreamingProfile"]
+        ),
+        .executable(
+            name: "StreamingTest",
+            targets: ["StreamingTest"]
+        ),
+        .executable(
+            name: "StreamingBenchmark",
+            targets: ["StreamingBenchmark"]
+        ),
+        .executable(
+            name: "EarlyPlayback",
+            targets: ["EarlyPlayback"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.21.0"),
@@ -65,6 +89,56 @@ let package = Package(
             name: "TTSServer",
             dependencies: ["Nightingale"],
             path: "test_scripts/TTSServer"
+        ),
+        .executableTarget(
+            name: "TTSServerQuantized",
+            dependencies: ["Nightingale"],
+            path: "test_scripts/TTSServerQuantized"
+        ),
+        .executableTarget(
+            name: "QuantizeAndSave",
+            dependencies: [
+                "Nightingale",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
+            path: "test_scripts/QuantizeAndSave"
+        ),
+        .executableTarget(
+            name: "StreamingProfile",
+            dependencies: [
+                "Nightingale",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
+            path: "test_scripts/StreamingProfile"
+        ),
+        .executableTarget(
+            name: "StreamingTest",
+            dependencies: [
+                "Nightingale",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
+            path: "test_scripts/StreamingTest"
+        ),
+        .executableTarget(
+            name: "StreamingBenchmark",
+            dependencies: [
+                "Nightingale",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
+            path: "test_scripts/StreamingBenchmark"
+        ),
+        .executableTarget(
+            name: "EarlyPlayback",
+            dependencies: [
+                "Nightingale",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
+            path: "test_scripts/EarlyPlayback"
         ),
     ]
 )

@@ -105,13 +105,13 @@ public class RelPositionMultiHeadAttention: Module {
     let scale: Float
 
     // Use same property names as remapping expects: linear_q -> queryProj, etc.
-    public let queryProj: FixedLinear
-    public let keyProj: FixedLinear
-    public let valueProj: FixedLinear
-    public let outProj: FixedLinear
+    @ModuleInfo public var queryProj: FixedLinear
+    @ModuleInfo public var keyProj: FixedLinear
+    @ModuleInfo public var valueProj: FixedLinear
+    @ModuleInfo public var outProj: FixedLinear
 
     // RelPos specific
-    public let linearPos: FixedLinear
+    @ModuleInfo public var linearPos: FixedLinear
     public var posBiasU: MLXArray // [H, D_h] - var so weights can be loaded
     public var posBiasV: MLXArray // [H, D_h] - var so weights can be loaded
 

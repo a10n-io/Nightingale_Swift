@@ -10,11 +10,11 @@ public class RelativePositionAttention: Module {
     let headDim: Int
     let scale: Float
 
-    let linearQ: Linear
-    let linearK: Linear
-    let linearV: Linear
-    let linearOut: Linear
-    let linearPos: Linear
+    @ModuleInfo var linearQ: Linear
+    @ModuleInfo var linearK: Linear
+    @ModuleInfo var linearV: Linear
+    @ModuleInfo var linearOut: Linear
+    @ModuleInfo var linearPos: Linear
 
     // Learnable position biases
     var posBiasU: MLXArray  // [numHeads, headDim]
@@ -141,8 +141,8 @@ public class RelativePositionAttention: Module {
 // MARK: - Feed Forward
 
 public class ConformerFeedForward: Module {
-    let w1: Linear
-    let w2: Linear
+    @ModuleInfo var w1: Linear
+    @ModuleInfo var w2: Linear
 
     public init(dim: Int, hiddenDim: Int = 2048, weights: [String: MLXArray], prefix: String) {
         // Use LinearFactory to handle quantized weights
@@ -206,7 +206,7 @@ public class ConformerEncoderBlock: Module {
 // MARK: - Embedding Layer (Linear + Norm + Positional Encoding)
 
 public class FlowEmbedding: Module {
-    let linear: Linear
+    @ModuleInfo var linear: Linear
     let norm: LayerNorm
     let posEnc: EspnetRelPositionalEncoding
 
@@ -366,7 +366,7 @@ public class FlowEncoder: Module {
 
     // Output
     public let afterNorm: LayerNorm
-    public let encoderProj: Linear
+    @ModuleInfo public var encoderProj: Linear
 
     public init(hiddenDim: Int = 512, melDim: Int = 80, numHeads: Int = 8,
                 weights: [String: MLXArray]) {
