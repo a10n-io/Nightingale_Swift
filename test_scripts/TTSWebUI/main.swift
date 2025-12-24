@@ -182,6 +182,9 @@ func makeHtmlPage(version: String, gitHash: String, isWarmed: Bool) -> String {
         button:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0, 212, 255, 0.4); }
         button:active { transform: translateY(0); }
         button:disabled { background: #555; cursor: not-allowed; transform: none; box-shadow: none; }
+        .button-group { display: flex; gap: 10px; justify-content: center; }
+        #stop { background: linear-gradient(135deg, #ff6b6b, #cc4444); }
+        #stop:hover:not(:disabled) { box-shadow: 0 4px 20px rgba(255, 107, 107, 0.4); }
         .metrics {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -196,7 +199,23 @@ func makeHtmlPage(version: String, gitHash: String, isWarmed: Bool) -> String {
             text-align: center;
         }
         .metric-value { font-size: 28px; font-weight: bold; color: #00d4ff; }
+        .metric-value.rtf-fast { color: #00ff88; }
+        .metric-value.rtf-ok { color: #ffdd00; }
+        .metric-value.rtf-slow { color: #ff6b6b; }
         .metric-label { color: #888; font-size: 12px; margin-top: 5px; }
+        .rtf-key {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 10px;
+            font-size: 11px;
+            color: #888;
+        }
+        .rtf-key span { display: flex; align-items: center; gap: 5px; }
+        .rtf-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .rtf-dot.fast { background: #00ff88; }
+        .rtf-dot.ok { background: #ffdd00; }
+        .rtf-dot.slow { background: #ff6b6b; }
         .status {
             padding: 15px;
             border-radius: 8px;
@@ -261,24 +280,31 @@ func makeHtmlPage(version: String, gitHash: String, isWarmed: Bool) -> String {
                 <span>INT8 Quantized (Faster)</span>
             </label>
             <label class="checkbox-label">
-                <input type="checkbox" id="streaming" checked>
-                <span>Streaming Mode</span>
-            </label>
-            <label class="checkbox-label">
                 <input type="checkbox" id="autoplay" checked>
                 <span>Auto-play</span>
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" id="streaming" checked>
+                <span>Streaming</span>
             </label>
         </div>
     </div>
 
-    <button id="generate" onclick="generateSpeech()">▶ Generate Speech</button>
+    <div class="button-group">
+        <button id="generate" onclick="generateSpeech()">▶ Generate Speech</button>
+        <button id="stop" onclick="stopPlayback()" disabled>⏹ Stop</button>
+    </div>
 
     <div id="status" class="status"></div>
 
     <div class="metrics">
         <div class="metric">
             <div class="metric-value" id="ttfa">--</div>
-            <div class="metric-label">TTFA (ms)</div>
+            <div class="metric-label">TTFA (s)</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value" id="genTime">--</div>
+            <div class="metric-label">Gen Time (s)</div>
         </div>
         <div class="metric">
             <div class="metric-value" id="rtf">--</div>
@@ -290,8 +316,13 @@ func makeHtmlPage(version: String, gitHash: String, isWarmed: Bool) -> String {
         </div>
         <div class="metric">
             <div class="metric-value" id="duration">--</div>
-            <div class="metric-label">Duration (s)</div>
+            <div class="metric-label">Audio (s)</div>
         </div>
+    </div>
+    <div class="rtf-key">
+        <span><div class="rtf-dot fast"></div> Fast (&lt;0.8x)</span>
+        <span><div class="rtf-dot ok"></div> Real-time (0.8-1.2x)</span>
+        <span><div class="rtf-dot slow"></div> Slow (&gt;1.2x)</span>
     </div>
 
     <div id="audioContainer" class="audio-container">
@@ -299,57 +330,172 @@ func makeHtmlPage(version: String, gitHash: String, isWarmed: Bool) -> String {
     </div>
 
     <script>
+        let audioContext = null;
+        let nextPlayTime = 0;
+        let isPlaying = false;
+        let abortController = null;
+        let activeSources = [];
+
+        function stopPlayback() {
+            // Abort fetch request
+            if (abortController) {
+                abortController.abort();
+                abortController = null;
+            }
+            // Stop all scheduled audio
+            activeSources.forEach(source => {
+                try { source.stop(); } catch(e) {}
+            });
+            activeSources = [];
+            isPlaying = false;
+            nextPlayTime = 0;
+
+            document.getElementById('generate').disabled = false;
+            document.getElementById('generate').textContent = '▶ Generate Speech';
+            document.getElementById('stop').disabled = true;
+            document.getElementById('status').textContent = 'Stopped';
+            document.getElementById('status').className = 'status';
+        }
+
         async function generateSpeech() {
             const btn = document.getElementById('generate');
+            const stopBtn = document.getElementById('stop');
             const status = document.getElementById('status');
             const audioContainer = document.getElementById('audioContainer');
             const audio = document.getElementById('audio');
 
+            // Stop any existing playback
+            stopPlayback();
+
             btn.disabled = true;
+            stopBtn.disabled = false;
             btn.textContent = '⏳ Generating...';
             status.className = 'status loading';
             status.textContent = 'Generating speech...';
             audioContainer.className = 'audio-container';
 
             // Reset metrics
-            ['ttfa', 'rtf', 'tokens', 'duration'].forEach(id => {
+            ['ttfa', 'genTime', 'rtf', 'tokens', 'duration'].forEach(id => {
                 document.getElementById(id).textContent = '--';
             });
+            document.getElementById('rtf').classList.remove('rtf-fast', 'rtf-ok', 'rtf-slow');
 
             const params = new URLSearchParams({
                 text: document.getElementById('text').value,
                 voice: document.getElementById('voice').value,
                 temperature: document.getElementById('temperature').value,
-                quantized: document.getElementById('quantized').checked,
-                streaming: document.getElementById('streaming').checked
+                quantized: document.getElementById('quantized').checked
             });
+
+            const autoplay = document.getElementById('autoplay').checked;
+            const streaming = document.getElementById('streaming').checked;
 
             try {
                 const startTime = performance.now();
-                const response = await fetch('/generate?' + params.toString());
+                const sampleRate = 24000;
+                let allSamples = [];
 
-                if (!response.ok) {
-                    throw new Error(await response.text());
+                abortController = new AbortController();
+
+                if (streaming) {
+                    // STREAMING MODE: Play audio as it's generated
+                    if (!audioContext) {
+                        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+                    }
+                    if (audioContext.state === 'suspended') {
+                        await audioContext.resume();
+                    }
+
+                    nextPlayTime = 0;
+                    isPlaying = false;
+                    activeSources = [];
+
+                    const response = await fetch('/stream?' + params.toString(), { signal: abortController.signal });
+                    if (!response.ok) throw new Error(await response.text());
+
+                    const tokens = response.headers.get('X-Tokens');
+                    if (tokens) document.getElementById('tokens').textContent = tokens;
+
+                    const reader = response.body.getReader();
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        if (value && value.length > 0) {
+                            const int16Array = new Int16Array(value.buffer, value.byteOffset, value.byteLength / 2);
+                            const chunkSamples = new Float32Array(int16Array.length);
+                            for (let i = 0; i < int16Array.length; i++) {
+                                chunkSamples[i] = int16Array[i] / 32768.0;
+                                allSamples.push(chunkSamples[i]);
+                            }
+
+                            if (autoplay && chunkSamples.length > 0) {
+                                const buffer = audioContext.createBuffer(1, chunkSamples.length, sampleRate);
+                                buffer.getChannelData(0).set(chunkSamples);
+
+                                const source = audioContext.createBufferSource();
+                                source.buffer = buffer;
+                                source.connect(audioContext.destination);
+                                activeSources.push(source);
+
+                                if (!isPlaying) {
+                                    nextPlayTime = audioContext.currentTime;
+                                    isPlaying = true;
+                                    const ttfa = (performance.now() - startTime) / 1000;
+                                    document.getElementById('ttfa').textContent = ttfa.toFixed(2);
+                                    status.textContent = 'Playing audio...';
+                                }
+
+                                source.start(nextPlayTime);
+                                nextPlayTime += buffer.duration;
+                            }
+                        }
+                    }
+                } else {
+                    // BATCH MODE: Generate full audio, then play
+                    document.getElementById('ttfa').textContent = 'N/A';
+
+                    const response = await fetch('/generate?' + params.toString(), { signal: abortController.signal });
+                    if (!response.ok) throw new Error(await response.text());
+
+                    const tokens = response.headers.get('X-Tokens');
+                    if (tokens) document.getElementById('tokens').textContent = tokens;
+
+                    const arrayBuffer = await response.arrayBuffer();
+                    const int16Array = new Int16Array(arrayBuffer);
+                    allSamples = new Array(int16Array.length);
+                    for (let i = 0; i < int16Array.length; i++) {
+                        allSamples[i] = int16Array[i] / 32768.0;
+                    }
                 }
 
-                // Get metrics from headers
-                const ttfa = response.headers.get('X-TTFA-Ms');
-                const rtf = response.headers.get('X-RTF');
-                const tokens = response.headers.get('X-Tokens');
-                const audioDuration = response.headers.get('X-Duration');
+                const endTime = performance.now();
+                const genTime = (endTime - startTime) / 1000;
+                document.getElementById('genTime').textContent = genTime.toFixed(1);
 
-                if (ttfa) document.getElementById('ttfa').textContent = ttfa;
-                if (rtf) document.getElementById('rtf').textContent = rtf;
-                if (tokens) document.getElementById('tokens').textContent = tokens;
-                if (audioDuration) document.getElementById('duration').textContent = audioDuration;
+                const duration = allSamples.length / sampleRate;
+                document.getElementById('duration').textContent = duration.toFixed(2);
 
-                const blob = await response.blob();
-                const url = URL.createObjectURL(blob);
+                const rtf = genTime / duration;
+                const rtfEl = document.getElementById('rtf');
+                rtfEl.textContent = rtf.toFixed(2);
+                rtfEl.classList.remove('rtf-fast', 'rtf-ok', 'rtf-slow');
+                if (rtf < 0.8) {
+                    rtfEl.classList.add('rtf-fast');
+                } else if (rtf <= 1.2) {
+                    rtfEl.classList.add('rtf-ok');
+                } else {
+                    rtfEl.classList.add('rtf-slow');
+                }
 
-                audio.src = url;
+                const wavBlob = createWavBlob(allSamples, sampleRate);
+                const wavUrl = URL.createObjectURL(wavBlob);
+                audio.src = wavUrl;
                 audioContainer.className = 'audio-container visible';
 
-                if (document.getElementById('autoplay').checked) {
+                // Auto-play in batch mode
+                if (!streaming && autoplay) {
                     audio.play();
                 }
 
@@ -357,15 +503,53 @@ func makeHtmlPage(version: String, gitHash: String, isWarmed: Bool) -> String {
                 status.textContent = 'Generation complete!';
 
             } catch (err) {
+                if (err.name === 'AbortError') {
+                    // User stopped - already handled by stopPlayback()
+                    return;
+                }
                 status.className = 'status error';
                 status.textContent = 'Error: ' + err.message;
             } finally {
                 btn.disabled = false;
                 btn.textContent = '▶ Generate Speech';
+                stopBtn.disabled = true;
+                abortController = null;
             }
         }
 
-        // Allow Ctrl+Enter to generate
+        function createWavBlob(samples, sampleRate) {
+            const buffer = new ArrayBuffer(44 + samples.length * 2);
+            const view = new DataView(buffer);
+
+            const writeString = (offset, str) => {
+                for (let i = 0; i < str.length; i++) {
+                    view.setUint8(offset + i, str.charCodeAt(i));
+                }
+            };
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + samples.length * 2, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, 'data');
+            view.setUint32(40, samples.length * 2, true);
+
+            let offset = 44;
+            for (let i = 0; i < samples.length; i++) {
+                const s = Math.max(-1, Math.min(1, samples[i]));
+                view.setInt16(offset, s * 32767, true);
+                offset += 2;
+            }
+
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
         document.getElementById('text').addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key === 'Enter') {
                 generateSpeech();
@@ -409,35 +593,51 @@ class TTSWebServer {
         currentVoice = voice
     }
 
-    func generateAudio(text: String, temperature: Float, streaming: Bool) async throws -> (audio: [Float], ttfaMs: Int, tokens: Int) {
+    struct GenerationMetrics {
+        let audio: [Float]
+        let totalMs: Int
+        let t3Ms: Int
+        let s3Ms: Int
+        let ttfaMs: Int  // Theoretical time to first audio (streaming)
+        let tokenCount: Int
+    }
+
+    func generateAudio(text: String, temperature: Float, streaming: Bool) async throws -> GenerationMetrics {
         let overallStart = Date()
 
-        // Generate tokens first
+        // Generate tokens first (T3)
+        let t3Start = Date()
         let tokens = try await engine.runT3Only(text, temperature: temperature)
-        let t3Time = Date().timeIntervalSince(overallStart)
+        let t3Ms = Int(Date().timeIntervalSince(t3Start) * 1000)
 
-        // Synthesize audio with TTFA measurement
+        // Synthesize audio (S3Gen)
+        let s3Start = Date()
         let audio: [Float]
-        var ttfaMs: Int
 
         if streaming {
-            // TTFA = T3 time for first 20 tokens + S3Gen first chunk time
-            // Estimate first chunk T3 time proportionally
-            let firstChunkTokens = min(20, tokens.count)
-            let t3FirstChunkMs = Int(t3Time * 1000.0 * Double(firstChunkTokens) / Double(tokens.count))
-
-            let (audioResult, firstChunkS3Ms) = try await synthesizeStreamingWithTTFA(tokens: tokens)
+            let (audioResult, _) = try await synthesizeStreamingWithTTFA(tokens: tokens)
             audio = audioResult
-            ttfaMs = t3FirstChunkMs + firstChunkS3Ms
         } else {
-            // Full synthesis - TTFA is total time
-            let s3Start = Date()
             audio = try await engine.synthesizeFromTokens(tokens)
-            let s3Time = Date().timeIntervalSince(s3Start)
-            ttfaMs = Int((t3Time + s3Time) * 1000)
         }
+        let s3Ms = Int(Date().timeIntervalSince(s3Start) * 1000)
 
-        return (audio, ttfaMs, tokens.count)
+        // Calculate theoretical TTFA for streaming:
+        // Time to generate first 20 tokens + time to synthesize first chunk
+        let firstChunkTokens = min(20, tokens.count)
+        let t3PerToken = Double(t3Ms) / Double(tokens.count)
+        let s3PerToken = Double(s3Ms) / Double(tokens.count)
+        let ttfaMs = Int(t3PerToken * Double(firstChunkTokens) + s3PerToken * Double(firstChunkTokens))
+
+        let totalMs = Int(Date().timeIntervalSince(overallStart) * 1000)
+        return GenerationMetrics(
+            audio: audio,
+            totalMs: totalMs,
+            t3Ms: t3Ms,
+            s3Ms: s3Ms,
+            ttfaMs: ttfaMs,
+            tokenCount: tokens.count
+        )
     }
 
     func synthesizeStreamingWithTTFA(tokens: [Int]) async throws -> (audio: [Float], firstChunkMs: Int) {
@@ -495,20 +695,9 @@ class TTSWebServer {
             return
         }
 
-        // Warmup generation to prime GPU caches
-        // Use longer text to avoid short-text issues
-        print("\n🔥 Warming up GPU caches...")
-        let warmupStart = Date()
-        do {
-            let warmupText = "Wow! I absolutely cannot believe that it worked on the first try! This is amazing technology that will change everything."
-            let _ = try await generateAudio(text: warmupText, temperature: 0.5, streaming: true)
-            let warmupTime = Date().timeIntervalSince(warmupStart)
-            print("✅ Warmup complete in \(String(format: "%.2f", warmupTime))s")
-            isWarmed = true
-        } catch {
-            print("⚠️ Warmup failed: \(error)")
-            isWarmed = true  // Still consider warmed even if warmup failed
-        }
+        // Warmup disabled for faster startup - first generation will be slower
+        isWarmed = true
+        print("\n⚡ Warmup disabled - first generation will prime GPU caches")
 
         // Create socket
         let server = try! Socket(port: PORT)
@@ -540,6 +729,8 @@ class TTSWebServer {
                 contentType: "text/html",
                 body: html.data(using: .utf8)!
             )
+        } else if path.hasPrefix("/stream") {
+            await handleStreamingGenerate(client, path: path)
         } else if path.hasPrefix("/generate") {
             await handleGenerate(client, path: path)
         } else {
@@ -590,30 +781,32 @@ class TTSWebServer {
             try await loadVoice(voice)
 
             // Generate
-            let genStart = Date()
-            let (audio, ttfaMs, tokenCount) = try await generateAudio(
+            let metrics = try await generateAudio(
                 text: text,
                 temperature: temperature,
                 streaming: streaming
             )
-            let totalTime = Date().timeIntervalSince(genStart)
 
             // Calculate metrics
             let sampleRate = 24000
-            let duration = Float(audio.count) / Float(sampleRate)
-            let rtf = totalTime / Double(duration)
+            let duration = Float(metrics.audio.count) / Float(sampleRate)
+            let rtf = Double(metrics.totalMs) / 1000.0 / Double(duration)
 
-            print("   ✅ Generated \(audio.count) samples (\(String(format: "%.2f", duration))s)")
-            print("   ⏱  TTFA: \(ttfaMs)ms, RTF: \(String(format: "%.2f", rtf))x, Tokens: \(tokenCount)")
+            print("   ✅ Generated \(metrics.audio.count) samples (\(String(format: "%.2f", duration))s)")
+            print("   ⏱  Total: \(metrics.totalMs)ms (T3: \(metrics.t3Ms)ms, S3: \(metrics.s3Ms)ms)")
+            print("   ⏱  TTFA: \(metrics.ttfaMs)ms, RTF: \(String(format: "%.2f", rtf))x, Tokens: \(metrics.tokenCount)")
 
             // Convert to WAV
-            let wavData = createWAV(samples: audio, sampleRate: sampleRate)
+            let wavData = createWAV(samples: metrics.audio, sampleRate: sampleRate)
 
             // Send response with metrics in headers
             let headers = [
-                "X-TTFA-Ms": "\(ttfaMs)",
+                "X-Time-Ms": "\(metrics.totalMs)",
+                "X-TTFA-Ms": "\(metrics.ttfaMs)",
+                "X-T3-Ms": "\(metrics.t3Ms)",
+                "X-S3-Ms": "\(metrics.s3Ms)",
                 "X-RTF": String(format: "%.2f", rtf),
-                "X-Tokens": "\(tokenCount)",
+                "X-Tokens": "\(metrics.tokenCount)",
                 "X-Duration": String(format: "%.2f", duration)
             ]
 
@@ -634,6 +827,152 @@ class TTSWebServer {
         }
     }
 
+    func handleStreamingGenerate(_ client: ClientSocket, path: String) async {
+        let params = parseQueryParams(path)
+
+        guard let text = params["text"], text.count >= 30 else {
+            client.sendResponse(
+                status: "400 Bad Request",
+                contentType: "text/plain",
+                body: "Text must be at least 30 characters".data(using: .utf8)!
+            )
+            return
+        }
+
+        let voice = params["voice"] ?? "samantha"
+        let temperature = Float(params["temperature"] ?? "0.0001") ?? 0.0001
+        let quantized = params["quantized"] == "true"
+
+        print("\n🌊 Streaming request: \"\(text.prefix(50))...\"")
+
+        do {
+            try await loadModels(quantized: quantized)
+            try await loadVoice(voice)
+
+            let overallStart = Date()
+
+            // Generate T3 tokens first (fast)
+            let t3Start = Date()
+            let tokens = try await engine.runT3Only(text, temperature: temperature)
+            let t3Ms = Int(Date().timeIntervalSince(t3Start) * 1000)
+            print("   T3: \(t3Ms)ms for \(tokens.count) tokens")
+
+            // Send chunked header with metadata
+            client.sendChunkedHeader(contentType: "application/octet-stream", extraHeaders: [
+                "X-Sample-Rate": "24000",
+                "X-Tokens": "\(tokens.count)",
+                "X-T3-Ms": "\(t3Ms)"
+            ])
+
+            // Stream audio in chunks with crossfading
+            let initialChunkSize = 20
+            let subsequentChunkSize = 10
+            let overlapTokens = 6  // Increased overlap for smoother transitions
+            let samplesPerToken = 960
+            let crossfadeSamples = overlapTokens * samplesPerToken
+
+            var tokenIndex = 0
+            var chunkNum = 0
+            var ttfaMs = 0
+            var previousTail: [Float] = []  // Last samples from previous chunk for crossfading
+
+            while tokenIndex < tokens.count {
+                let chunkSize = (chunkNum == 0) ? initialChunkSize : subsequentChunkSize
+                let endIndex = min(tokenIndex + chunkSize, tokens.count)
+
+                var chunkTokens: [Int]
+                if chunkNum == 0 {
+                    chunkTokens = Array(tokens[tokenIndex..<endIndex])
+                } else {
+                    let overlapStart = max(0, tokenIndex - overlapTokens)
+                    chunkTokens = Array(tokens[overlapStart..<endIndex])
+                }
+
+                let chunkStart = Date()
+                let chunkAudio = try await engine.synthesizeFromTokens(chunkTokens)
+                let chunkTime = Int(Date().timeIntervalSince(chunkStart) * 1000)
+
+                if chunkNum == 0 {
+                    ttfaMs = t3Ms + chunkTime
+                    print("   🎵 TTFA: \(ttfaMs)ms (T3: \(t3Ms)ms + S3: \(chunkTime)ms)")
+                }
+
+                var outputAudio: [Float]
+
+                if chunkNum == 0 {
+                    // First chunk - send most, keep tail for crossfading
+                    let keepSamples = min(crossfadeSamples, chunkAudio.count)
+                    let sendCount = chunkAudio.count - keepSamples
+                    outputAudio = Array(chunkAudio[0..<sendCount])
+                    previousTail = Array(chunkAudio[sendCount...])
+                } else {
+                    // Subsequent chunks - crossfade with previous tail
+                    let overlapSamples = overlapTokens * samplesPerToken
+
+                    // Current chunk starts with overlap region
+                    var crossfaded: [Float] = []
+
+                    // Crossfade the overlap region
+                    let fadeLen = min(previousTail.count, min(overlapSamples, chunkAudio.count))
+                    for i in 0..<fadeLen {
+                        let fadeOut = Float(fadeLen - i) / Float(fadeLen)  // 1.0 -> 0.0
+                        let fadeIn = Float(i) / Float(fadeLen)              // 0.0 -> 1.0
+                        let mixed = previousTail[i] * fadeOut + chunkAudio[i] * fadeIn
+                        crossfaded.append(mixed)
+                    }
+
+                    // Add remaining samples after overlap
+                    if overlapSamples < chunkAudio.count {
+                        let remaining = Array(chunkAudio[overlapSamples...])
+                        // Keep tail for next crossfade
+                        let keepSamples = min(crossfadeSamples, remaining.count)
+                        let sendCount = remaining.count - keepSamples
+                        crossfaded.append(contentsOf: remaining[0..<sendCount])
+                        previousTail = Array(remaining[sendCount...])
+                    } else {
+                        previousTail = []
+                    }
+
+                    outputAudio = crossfaded
+                }
+
+                // Convert to Int16 PCM and send
+                var pcmData = Data()
+                for sample in outputAudio {
+                    let clipped = max(-1.0, min(1.0, sample))
+                    let scaled = Int16(clipped * 32767.0)
+                    pcmData.append(scaled.littleEndianData)
+                }
+
+                if !pcmData.isEmpty {
+                    client.sendChunk(pcmData)
+                }
+
+                tokenIndex = endIndex
+                chunkNum += 1
+            }
+
+            // Send any remaining tail
+            if !previousTail.isEmpty {
+                var pcmData = Data()
+                for sample in previousTail {
+                    let clipped = max(-1.0, min(1.0, sample))
+                    let scaled = Int16(clipped * 32767.0)
+                    pcmData.append(scaled.littleEndianData)
+                }
+                client.sendChunk(pcmData)
+            }
+
+            client.sendChunkedEnd()
+
+            let totalMs = Int(Date().timeIntervalSince(overallStart) * 1000)
+            print("   ✅ Streamed \(chunkNum) chunks in \(totalMs)ms, TTFA: \(ttfaMs)ms")
+
+        } catch {
+            print("   ❌ Stream error: \(error)")
+        }
+    }
+
     func parseRequest(_ request: String) -> (method: String, path: String) {
         let lines = request.components(separatedBy: "\r\n")
         guard let firstLine = lines.first else { return ("GET", "/") }
@@ -651,7 +990,9 @@ class TTSWebServer {
             let parts = pair.components(separatedBy: "=")
             if parts.count == 2 {
                 let key = parts[0].removingPercentEncoding ?? parts[0]
-                let value = parts[1].removingPercentEncoding ?? parts[1]
+                // URL query strings use + for space, then percent encoding
+                let rawValue = parts[1].replacingOccurrences(of: "+", with: " ")
+                let value = rawValue.removingPercentEncoding ?? rawValue
                 params[key] = value
             }
         }
@@ -755,7 +1096,7 @@ class ClientSocket {
         response += "Content-Type: \(contentType)\r\n"
         response += "Content-Length: \(body.count)\r\n"
         response += "Access-Control-Allow-Origin: *\r\n"
-        response += "Access-Control-Expose-Headers: X-TTFA-Ms, X-RTF, X-Tokens, X-Duration\r\n"
+        response += "Access-Control-Expose-Headers: X-Time-Ms, X-TTFA-Ms, X-T3-Ms, X-S3-Ms, X-RTF, X-Tokens, X-Duration\r\n"
 
         for (key, value) in extraHeaders {
             response += "\(key): \(value)\r\n"
@@ -769,6 +1110,47 @@ class ClientSocket {
 
         body.withUnsafeBytes { ptr in
             _ = write(fd, ptr.baseAddress!, body.count)
+        }
+    }
+
+    func sendChunkedHeader(contentType: String, extraHeaders: [String: String] = [:]) {
+        var response = "HTTP/1.1 200 OK\r\n"
+        response += "Content-Type: \(contentType)\r\n"
+        response += "Transfer-Encoding: chunked\r\n"
+        response += "Access-Control-Allow-Origin: *\r\n"
+        response += "Cache-Control: no-cache\r\n"
+
+        for (key, value) in extraHeaders {
+            response += "\(key): \(value)\r\n"
+        }
+
+        response += "\r\n"
+
+        _ = response.withCString { ptr in
+            write(fd, ptr, strlen(ptr))
+        }
+    }
+
+    func sendChunk(_ data: Data) {
+        // Send chunk size in hex
+        let sizeHex = String(format: "%X\r\n", data.count)
+        _ = sizeHex.withCString { ptr in
+            write(fd, ptr, strlen(ptr))
+        }
+        // Send chunk data
+        data.withUnsafeBytes { ptr in
+            _ = write(fd, ptr.baseAddress!, data.count)
+        }
+        // Send CRLF after chunk
+        _ = "\r\n".withCString { ptr in
+            write(fd, ptr, 2)
+        }
+    }
+
+    func sendChunkedEnd() {
+        // Send final empty chunk
+        _ = "0\r\n\r\n".withCString { ptr in
+            write(fd, ptr, 5)
         }
     }
 
