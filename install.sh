@@ -133,7 +133,16 @@ download_gdrive "$ASSETS_GDRIVE_ID" "$ASSETS_ZIP"
 # Extract the zip
 if [ -f "$ASSETS_ZIP" ]; then
     echo -e "${BLUE}==>${NC} Extracting assets..."
-    unzip -q "$ASSETS_ZIP" -d "$INSTALL_DIR"
+    unzip -q "$ASSETS_ZIP" -d /tmp/nightingale_extract
+
+    # Move contents from any subfolder (handles "Model + Voices" folder in zip)
+    if [ -d /tmp/nightingale_extract ]; then
+        # Find and move models and baked_voices to install dir
+        find /tmp/nightingale_extract -type d -name "models" -exec cp -r {} "$INSTALL_DIR/" \;
+        find /tmp/nightingale_extract -type d -name "baked_voices" -exec cp -r {} "$INSTALL_DIR/" \;
+        rm -rf /tmp/nightingale_extract
+    fi
+
     rm -f "$ASSETS_ZIP"
     echo -e "${GREEN}✓${NC} Models and voices installed"
 else
@@ -144,7 +153,9 @@ fi
 # Verify files exist
 if [ ! -f "models/chatterbox/s3gen.safetensors" ]; then
     echo -e "${RED}✗${NC} Model files not found after extraction."
-    echo "   Please check the zip file structure."
+    echo "   Expected: models/chatterbox/s3gen.safetensors"
+    echo "   Found:"
+    ls -la models/ 2>/dev/null || echo "   (models/ directory not found)"
     exit 1
 fi
 
