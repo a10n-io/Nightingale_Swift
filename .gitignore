@@ -24,6 +24,8 @@ DerivedData/
 # Test outputs
 test_audio/
 verification_outputs/
+output/
+test_output/
 
 # Model files (large - too big for GitHub, use Git LFS or download separately)
 models/
