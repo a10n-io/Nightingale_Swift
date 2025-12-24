@@ -105,32 +105,27 @@ download_gdrive() {
 
     # First try with gdown (handles large files best)
     if command -v gdown &>/dev/null; then
-        gdown "https://drive.google.com/uc?id=${file_id}" -O "$output" --quiet
+        gdown "https://drive.google.com/uc?id=${file_id}" -O "$output" --fuzzy --quiet
         return $?
     fi
 
     # Install gdown if pip3 available
     if command -v pip3 &>/dev/null; then
         echo "   Installing download helper..."
-        pip3 install --user gdown --quiet 2>/dev/null
-        export PATH="$HOME/Library/Python/3.9/bin:$HOME/.local/bin:$PATH"
+        pip3 install --user --break-system-packages gdown 2>/dev/null || pip3 install --user gdown 2>/dev/null
+        # Add common Python bin paths
+        export PATH="$HOME/Library/Python/3.9/bin:$HOME/Library/Python/3.10/bin:$HOME/Library/Python/3.11/bin:$HOME/Library/Python/3.12/bin:$HOME/.local/bin:$PATH"
         if command -v gdown &>/dev/null; then
-            gdown "https://drive.google.com/uc?id=${file_id}" -O "$output" --quiet
+            gdown "https://drive.google.com/uc?id=${file_id}" -O "$output" --fuzzy --quiet
             return $?
         fi
     fi
 
-    # Fallback: curl with confirmation bypass for large files
-    echo "   Downloading via curl (this may take longer)..."
-    local confirm=$(curl -sc /tmp/gcookie "https://drive.google.com/uc?export=download&id=${file_id}" | \
-        grep -o 'confirm=[^&]*' | cut -d= -f2)
-    if [ -n "$confirm" ]; then
-        curl -Lb /tmp/gcookie \
-            "https://drive.google.com/uc?export=download&confirm=${confirm}&id=${file_id}" \
-            -o "$output"
-    else
-        curl -L "https://drive.google.com/uc?export=download&id=${file_id}" -o "$output"
-    fi
+    # Fallback: direct curl with new Google Drive URL format
+    echo "   Downloading via curl..."
+    curl -L -o "$output" \
+        "https://drive.usercontent.google.com/download?id=${file_id}&export=download&confirm=t" \
+        --progress-bar
 }
 
 download_gdrive "$ASSETS_GDRIVE_ID" "$ASSETS_ZIP"
