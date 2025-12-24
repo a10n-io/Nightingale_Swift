@@ -168,6 +168,12 @@ func makeHtmlPage(version: String, gitHash: String, isWarmed: Bool) -> String {
             cursor: pointer;
         }
         .checkbox-label input { width: 18px; height: 18px; }
+        .streaming-note {
+            font-size: 11px;
+            color: #ffaa00;
+            margin-top: 8px;
+            opacity: 0.8;
+        }
         button {
             background: linear-gradient(135deg, #00d4ff, #0099cc);
             color: #000;
@@ -284,10 +290,11 @@ func makeHtmlPage(version: String, gitHash: String, isWarmed: Bool) -> String {
                 <span>Auto-play</span>
             </label>
             <label class="checkbox-label">
-                <input type="checkbox" id="streaming" checked>
+                <input type="checkbox" id="streaming">
                 <span>Streaming</span>
             </label>
         </div>
+        <div class="streaming-note">⚠️ Streaming mode has audio glitches - fix coming soon</div>
     </div>
 
     <div class="button-group">
