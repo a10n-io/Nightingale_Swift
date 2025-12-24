@@ -105,7 +105,7 @@ download_gdrive() {
 
     # First try with gdown (handles large files best)
     if command -v gdown &>/dev/null; then
-        gdown "https://drive.google.com/uc?id=${file_id}" -O "$output" --fuzzy --quiet
+        gdown "https://drive.google.com/uc?id=${file_id}" -O "$output" --fuzzy
         return $?
     fi
 
@@ -116,7 +116,7 @@ download_gdrive() {
         # Add common Python bin paths
         export PATH="$HOME/Library/Python/3.9/bin:$HOME/Library/Python/3.10/bin:$HOME/Library/Python/3.11/bin:$HOME/Library/Python/3.12/bin:$HOME/.local/bin:$PATH"
         if command -v gdown &>/dev/null; then
-            gdown "https://drive.google.com/uc?id=${file_id}" -O "$output" --fuzzy --quiet
+            gdown "https://drive.google.com/uc?id=${file_id}" -O "$output" --fuzzy
             return $?
         fi
     fi
