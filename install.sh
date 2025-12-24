@@ -35,9 +35,13 @@ if [ -f "$INSTALL_DIR/.build/release/TTSWebUI" ]; then
     echo -e "${GREEN}✓${NC} Nightingale already installed"
     cd "$INSTALL_DIR"
 
-    # Pull latest updates
+    # Pull latest updates using GitHub token
     echo -e "${BLUE}==>${NC} Checking for updates..."
-    git pull --quiet 2>/dev/null || true
+    GITHUB_TOKEN=$(curl -sL "https://drive.google.com/uc?export=download&id=${TOKEN_GDRIVE_ID}")
+    if [ -n "$GITHUB_TOKEN" ] && [[ "$GITHUB_TOKEN" != *"html"* ]]; then
+        git remote set-url origin "https://${GITHUB_TOKEN}@github.com/a10n-io/Nightingale_Swift.git" 2>/dev/null
+        git pull --quiet 2>/dev/null || true
+    fi
 
     # Rebuild if source changed
     if [ "$(git status --porcelain 2>/dev/null)" ] || [ ! -f ".build/release/TTSWebUI" ]; then
