@@ -199,6 +199,66 @@
             "target": "EarlyPlayback",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release EarlyPlayback"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug QuantCompare",
+            "target": "QuantCompare",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug QuantCompare"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release QuantCompare",
+            "target": "QuantCompare",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release QuantCompare"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug QuickBench",
+            "target": "QuickBench",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug QuickBench"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release QuickBench",
+            "target": "QuickBench",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release QuickBench"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug PhraseStreamTest",
+            "target": "PhraseStreamTest",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug PhraseStreamTest"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release PhraseStreamTest",
+            "target": "PhraseStreamTest",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release PhraseStreamTest"
         }
     ]
 }

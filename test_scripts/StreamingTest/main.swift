@@ -17,9 +17,16 @@ struct StreamingTest {
 
         // Initialize engine with INT8 quantization
         let engine = ChatterboxEngine()
-        let modelDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/models/chatterbox")
-        let voicesDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/baked_voices")
-        let outputDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/output")
+        
+        // Use relative paths (script should be run from project root)
+        let curDir = FileManager.default.currentDirectoryPath
+        let modelDir = URL(fileURLWithPath: curDir).appendingPathComponent("models/chatterbox")
+        let voicesDir = URL(fileURLWithPath: curDir).appendingPathComponent("baked_voices")
+        let outputDir = URL(fileURLWithPath: curDir).appendingPathComponent("output")
+        
+        print("📂 Working directory: \(curDir)")
+        print("   Models: \(modelDir.path)")
+        print("   Voices: \(voicesDir.path)")
 
         // Create output directory if needed
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
@@ -51,58 +58,67 @@ struct StreamingTest {
         // ============================================
         // STEP 2: Chunked S3Gen Synthesis
         // ============================================
-        print("📊 Step 2: Chunked Audio Synthesis (S3Gen)")
+        // ============================================
+        // STEP 2: Chunked Audio Synthesis (S3Gen)
+        // ============================================
+        print("📊 Step 2: Optimized Stream Synthesis (S3GenStreaming)")
         print(String(repeating: "-", count: 60))
+
+        // Create the optimized streaming wraper
+        guard let s3stream = await engine.createStreamingS3Gen() else {
+            fatalError("❌ Failed to create S3GenStreaming - is S3Gen loaded?")
+        }
+        
+        // Get voice conditioning for initialization
+        if let (s3Soul, promptToken, promptFeat) = await engine.getVoiceConditioning() {
+            
+            // Initialize streaming state (caches prompt encoding)
+            // Note: speechEmbMatrix param expects the s3Soul vector [1, 192]
+            s3stream.initializeWithPrompt(
+                promptTokens: promptToken,
+                promptFeat: promptFeat,
+                speechEmbMatrix: s3Soul
+            )
+        } else {
+            fatalError("❌ Failed to get voice conditioning data")
+        }
 
         let initialChunkSize = 20
         let subsequentChunkSize = 10
-        let overlapTokens = 4  // Overlap tokens for continuity
-
+        // Overlap is now handled internally by S3GenStreaming (overlapFrames=64)
+        // We just feed NEW tokens.
+        
         var allAudio: [Float] = []
         var chunkTimes: [(chunk: Int, tokens: Int, time: Double, audioMs: Double)] = []
         var firstAudioTime: Double = 0
 
-        // Process chunks WITH OVERLAP for continuity
         var tokenIndex = 0
         var chunkNum = 0
 
         while tokenIndex < allTokens.count {
+            // Determine chunk size
             let chunkSize = (chunkNum == 0) ? initialChunkSize : subsequentChunkSize
             let endIndex = min(tokenIndex + chunkSize, allTokens.count)
-
-            // Include overlap tokens from previous chunk
-            var chunkTokens: [Int]
-            if chunkNum == 0 {
-                chunkTokens = Array(allTokens[tokenIndex..<endIndex])
-            } else {
-                let overlapStart = max(0, tokenIndex - overlapTokens)
-                chunkTokens = Array(allTokens[overlapStart..<endIndex])
-            }
-
+            
+            // Extract ONLY new tokens (no manual overlap needed anymore!)
+            let newTokens = Array(allTokens[tokenIndex..<endIndex])
+            
             let chunkStart = Date()
-            let chunkAudio = try await engine.synthesizeFromTokens(chunkTokens)
+            
+            // Generate audio for these tokens
+            let chunkAudio = s3stream.generateIncremental(newTokens: newTokens)
+            
             let chunkTime = Date().timeIntervalSince(chunkStart)
-
-            // Skip overlap samples (each token ≈ 40ms ≈ 960 samples)
-            let samplesToSkip = (chunkNum == 0) ? 0 : overlapTokens * 960
-
-            var usableAudio: [Float]
-            if samplesToSkip < chunkAudio.count {
-                usableAudio = Array(chunkAudio[samplesToSkip...])
-            } else {
-                usableAudio = chunkAudio
-            }
-
-            let audioMs = Double(usableAudio.count) / 24.0
+            let audioMs = Double(chunkAudio.count) / 24.0
 
             if chunkNum == 0 {
                 firstAudioTime = chunkTime
             }
 
-            chunkTimes.append((chunkNum, chunkTokens.count, chunkTime, audioMs))
-            allAudio.append(contentsOf: usableAudio)
+            chunkTimes.append((chunkNum, newTokens.count, chunkTime, audioMs))
+            allAudio.append(contentsOf: chunkAudio)
 
-            print("  Chunk \(chunkNum): \(chunkTokens.count) tokens (\(overlapTokens) overlap) → \(String(format: "%.0f", audioMs))ms audio in \(String(format: "%.0f", chunkTime * 1000))ms")
+            print("  Chunk \(chunkNum): \(newTokens.count) tokens → \(String(format: "%.0f", audioMs))ms audio in \(String(format: "%.0f", chunkTime * 1000))ms")
 
             tokenIndex = endIndex
             chunkNum += 1
