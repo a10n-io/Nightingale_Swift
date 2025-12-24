@@ -29,13 +29,24 @@ echo "╚═══════════════════════�
 echo ""
 
 # ============================================
-# If already installed, just launch
+# If already installed, update and launch
 # ============================================
 if [ -f "$INSTALL_DIR/.build/release/TTSWebUI" ]; then
     echo -e "${GREEN}✓${NC} Nightingale already installed"
+    cd "$INSTALL_DIR"
+
+    # Pull latest updates
+    echo -e "${BLUE}==>${NC} Checking for updates..."
+    git pull --quiet 2>/dev/null || true
+
+    # Rebuild if source changed
+    if [ "$(git status --porcelain 2>/dev/null)" ] || [ ! -f ".build/release/TTSWebUI" ]; then
+        echo -e "${BLUE}==>${NC} Rebuilding..."
+        swift build -c release --product TTSWebUI 2>&1 | grep -E "(Compiling|Linking|Build complete)" || true
+    fi
+
     echo -e "${BLUE}==>${NC} Launching TTS Web Server..."
     echo ""
-    cd "$INSTALL_DIR"
     exec .build/release/TTSWebUI
 fi
 
