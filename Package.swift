@@ -64,6 +64,10 @@ let package = Package(
             name: "PhraseStreamTest",
             targets: ["PhraseStreamTest"]
         ),
+        .executable(
+            name: "TTSWebUI",
+            targets: ["TTSWebUI"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.21.0"),
@@ -178,6 +182,15 @@ let package = Package(
                 .product(name: "MLXNN", package: "mlx-swift"),
             ],
             path: "test_scripts/PhraseStreamTest"
+        ),
+        .executableTarget(
+            name: "TTSWebUI",
+            dependencies: [
+                "Nightingale",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
+            path: "test_scripts/TTSWebUI"
         ),
     ]
 )

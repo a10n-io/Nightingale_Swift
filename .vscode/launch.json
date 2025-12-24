@@ -259,6 +259,26 @@
             "target": "PhraseStreamTest",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release PhraseStreamTest"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Debug TTSWebUI",
+            "target": "TTSWebUI",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug TTSWebUI"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nightingale_Swift}",
+            "name": "Release TTSWebUI",
+            "target": "TTSWebUI",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release TTSWebUI"
         }
     ]
 }
