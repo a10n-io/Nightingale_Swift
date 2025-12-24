@@ -35,6 +35,3 @@ test_output/
 # Model files (large - too big for GitHub, use Git LFS or download separately)
 models/
 baked_voices/
-
-# Large compiled Metal library
-default.metallib
