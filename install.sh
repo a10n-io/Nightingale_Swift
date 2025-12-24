@@ -51,6 +51,7 @@ if [ -f "$INSTALL_DIR/.build/release/TTSWebUI" ]; then
 
     echo -e "${BLUE}==>${NC} Launching TTS Web Server..."
     echo ""
+    (sleep 3 && open "http://localhost:8080") &
     exec .build/release/TTSWebUI
 fi
 
@@ -202,5 +203,8 @@ echo "╚═══════════════════════�
 echo ""
 echo -e "${BLUE}==>${NC} Launching TTS Web Server..."
 echo ""
+
+# Open browser after short delay (server needs time to start)
+(sleep 3 && open "http://localhost:8080") &
 
 exec .build/release/TTSWebUI
