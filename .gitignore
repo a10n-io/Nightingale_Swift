@@ -3,6 +3,11 @@
 .AppleDouble
 .LSOverride
 
+# Secrets (never commit)
+.env
+token.txt
+Nightingale_Install.command
+
 # Claude
 .claude/
 

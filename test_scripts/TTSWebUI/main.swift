@@ -8,12 +8,83 @@ import Network
 // Simple HTTP server with web interface for TTS testing
 
 let PORT: UInt16 = 8080
+let VERSION = "1.0.0"
 
-print("🎤 Nightingale TTS Web UI")
+// Get current git commit hash
+func getGitVersion() -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["rev-parse", "--short", "HEAD"]
+    process.currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+
+    do {
+        try process.run()
+        process.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        if let hash = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !hash.isEmpty {
+            return hash
+        }
+    } catch {}
+    return "unknown"
+}
+
+// Check for updates from GitHub
+func checkForUpdates() -> (isLatest: Bool, localHash: String, remoteHash: String?) {
+    let localHash = getGitVersion()
+
+    // Try to fetch latest from remote
+    let fetchProcess = Process()
+    fetchProcess.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    fetchProcess.arguments = ["fetch", "--quiet"]
+    fetchProcess.currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    fetchProcess.standardOutput = FileHandle.nullDevice
+    fetchProcess.standardError = FileHandle.nullDevice
+    try? fetchProcess.run()
+    fetchProcess.waitUntilExit()
+
+    // Get remote HEAD
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["rev-parse", "--short", "origin/main"]
+    process.currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+
+    do {
+        try process.run()
+        process.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        if let remoteHash = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !remoteHash.isEmpty {
+            return (localHash == remoteHash, localHash, remoteHash)
+        }
+    } catch {}
+    return (true, localHash, nil)
+}
+
+let gitHash = getGitVersion()
+
+print("🎤 Nightingale TTS Web UI v\(VERSION) (\(gitHash))")
 print(String(repeating: "=", count: 60))
 
+// Check for updates
+print("🔄 Checking for updates...")
+let (isLatest, localHash, remoteHash) = checkForUpdates()
+if isLatest {
+    print("✅ You are running the latest version")
+} else if let remote = remoteHash {
+    print("⚠️  Update available: \(localHash) → \(remote)")
+    print("   Run: cd ~/Nightingale_Swift && git pull")
+}
+
 // MARK: - HTML Interface
-let htmlPage = """
+func makeHtmlPage(version: String, gitHash: String, isWarmed: Bool) -> String {
+    return """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,6 +102,39 @@ let htmlPage = """
             color: #eee;
         }
         h1 { color: #00d4ff; margin-bottom: 5px; }
+        .header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+        .version { color: #666; font-size: 12px; }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .status-badge.warm {
+            background: rgba(0, 255, 136, 0.15);
+            color: #00ff88;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+        }
+        .status-badge.cold {
+            background: rgba(255, 170, 0, 0.15);
+            color: #ffaa00;
+            border: 1px solid rgba(255, 170, 0, 0.3);
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        .status-dot.warm { background: #00ff88; }
+        .status-dot.cold { background: #ffaa00; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
         .subtitle { color: #888; margin-bottom: 30px; }
         .form-group { margin-bottom: 20px; }
         label { display: block; margin-bottom: 8px; color: #aaa; font-weight: 500; }
@@ -110,8 +214,19 @@ let htmlPage = """
     </style>
 </head>
 <body>
-    <h1>🎤 Nightingale TTS</h1>
-    <p class="subtitle">Swift/MLX Text-to-Speech Engine</p>
+    <div class="header-row">
+        <div>
+            <h1>🎤 Nightingale TTS</h1>
+            <p class="subtitle">Swift/MLX Text-to-Speech Engine</p>
+        </div>
+        <div style="text-align: right;">
+            <div class="status-badge \(isWarmed ? "warm" : "cold")">
+                <span class="status-dot \(isWarmed ? "warm" : "cold")"></span>
+                \(isWarmed ? "Model Warmed" : "Warming...")
+            </div>
+            <div class="version">v\(version) (\(gitHash))</div>
+        </div>
+    </div>
 
     <div class="form-group">
         <label for="text">Text to Synthesize</label>
@@ -122,16 +237,16 @@ let htmlPage = """
         <div class="form-group">
             <label for="voice">Voice</label>
             <select id="voice">
-                <option value="samantha">Samantha (Female)</option>
-                <option value="sujano" selected>Sujano (Male)</option>
+                <option value="samantha" selected>Samantha (Female)</option>
+                <option value="sujano">Sujano (Male)</option>
             </select>
         </div>
         <div class="form-group">
             <label for="temperature">Temperature</label>
             <select id="temperature">
-                <option value="0.0001">0.0001 (Deterministic)</option>
+                <option value="0.0001" selected>0.0001 (Deterministic)</option>
                 <option value="0.3">0.3 (Low)</option>
-                <option value="0.5" selected>0.5 (Medium)</option>
+                <option value="0.5">0.5 (Medium)</option>
                 <option value="0.7">0.7 (High)</option>
                 <option value="1.0">1.0 (Max)</option>
             </select>
@@ -260,6 +375,7 @@ let htmlPage = """
 </body>
 </html>
 """
+}
 
 // MARK: - Simple HTTP Server
 
@@ -268,6 +384,7 @@ class TTSWebServer {
     var currentVoice: String = ""
     var isQuantized: Bool = true
     var isLoaded: Bool = false
+    var isWarmed: Bool = false
 
     let projectRoot = FileManager.default.currentDirectoryPath
     lazy var modelDir = URL(fileURLWithPath: "\(projectRoot)/models/chatterbox")
@@ -372,7 +489,7 @@ class TTSWebServer {
         // Pre-load models
         do {
             try await loadModels(quantized: true)
-            try await loadVoice("sujano")
+            try await loadVoice("samantha")
         } catch {
             print("❌ Failed to load models: \(error)")
             return
@@ -387,8 +504,10 @@ class TTSWebServer {
             let _ = try await generateAudio(text: warmupText, temperature: 0.5, streaming: true)
             let warmupTime = Date().timeIntervalSince(warmupStart)
             print("✅ Warmup complete in \(String(format: "%.2f", warmupTime))s")
+            isWarmed = true
         } catch {
             print("⚠️ Warmup failed: \(error)")
+            isWarmed = true  // Still consider warmed even if warmup failed
         }
 
         // Create socket
@@ -414,11 +533,12 @@ class TTSWebServer {
         let (_, path) = parseRequest(request)
 
         if path == "/" || path == "/index.html" {
-            // Serve HTML page
+            // Serve HTML page with current state
+            let html = makeHtmlPage(version: VERSION, gitHash: gitHash, isWarmed: isWarmed)
             client.sendResponse(
                 status: "200 OK",
                 contentType: "text/html",
-                body: htmlPage.data(using: .utf8)!
+                body: html.data(using: .utf8)!
             )
         } else if path.hasPrefix("/generate") {
             await handleGenerate(client, path: path)
@@ -456,8 +576,8 @@ class TTSWebServer {
             return
         }
 
-        let voice = params["voice"] ?? "sujano"
-        let temperature = Float(params["temperature"] ?? "0.5") ?? 0.5
+        let voice = params["voice"] ?? "samantha"
+        let temperature = Float(params["temperature"] ?? "0.0001") ?? 0.0001
         let quantized = params["quantized"] == "true"
         let streaming = params["streaming"] == "true"
 
