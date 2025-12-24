@@ -16,9 +16,10 @@ struct EarlyPlayback {
 
         // Setup
         let engine = ChatterboxEngine()
-        let modelDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/models/chatterbox")
-        let voicesDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/baked_voices")
-        let outputDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/output")
+        let projectRoot = FileManager.default.currentDirectoryPath
+        let modelDir = URL(fileURLWithPath: "\(projectRoot)/models/chatterbox")
+        let voicesDir = URL(fileURLWithPath: "\(projectRoot)/baked_voices")
+        let outputDir = URL(fileURLWithPath: "\(projectRoot)/output")
 
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
 

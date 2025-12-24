@@ -7,8 +7,9 @@ import Nightingale
 @main
 struct QuickBench {
     static func main() async throws {
-        let modelDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/models/chatterbox")
-        let voicesDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/baked_voices")
+        let projectRoot = FileManager.default.currentDirectoryPath
+        let modelDir = URL(fileURLWithPath: "\(projectRoot)/models/chatterbox")
+        let voicesDir = URL(fileURLWithPath: "\(projectRoot)/baked_voices")
 
         // Suppress loading output by redirecting stderr temporarily
         let testText = "Hello, this is a quick performance test for Nightingale TTS."

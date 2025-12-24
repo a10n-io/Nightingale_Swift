@@ -12,9 +12,10 @@ struct PhraseStreamTest {
         print(String(repeating: "=", count: 60))
         print("")
 
-        let modelDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/models/chatterbox")
-        let voicesDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/baked_voices")
-        let outputDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/test_output")
+        let projectRoot = FileManager.default.currentDirectoryPath
+        let modelDir = URL(fileURLWithPath: "\(projectRoot)/models/chatterbox")
+        let voicesDir = URL(fileURLWithPath: "\(projectRoot)/baked_voices")
+        let outputDir = URL(fileURLWithPath: "\(projectRoot)/test_output")
 
         // Create output directory
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)

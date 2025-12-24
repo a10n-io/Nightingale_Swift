@@ -9,7 +9,8 @@ struct QuantizeAndSave {
         print("🔧 Quantize and Save T3 Model")
         print(String(repeating: "=", count: 60))
 
-        let modelDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/models/chatterbox")
+        let projectRoot = FileManager.default.currentDirectoryPath
+        let modelDir = URL(fileURLWithPath: "\(projectRoot)/models/chatterbox")
         let inputPath = modelDir.appendingPathComponent("t3_mtl23ls_v2.safetensors")
         let outputPath = modelDir.appendingPathComponent("t3_mtl23ls_v2_int8.safetensors")
 

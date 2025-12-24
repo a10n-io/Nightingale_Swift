@@ -14,8 +14,9 @@ struct StreamingProfile {
 
         // Initialize engine with INT8 quantization
         let engine = ChatterboxEngine()
-        let modelDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/models/chatterbox")
-        let voicesDir = URL(fileURLWithPath: "/Users/a10n/Projects/Nightingale_Swift/baked_voices")
+        let projectRoot = FileManager.default.currentDirectoryPath
+        let modelDir = URL(fileURLWithPath: "\(projectRoot)/models/chatterbox")
+        let voicesDir = URL(fileURLWithPath: "\(projectRoot)/baked_voices")
 
         print("⏳ Loading models (INT8 quantized)...")
         try await engine.loadModels(modelsURL: modelDir, useQuantization: true)
