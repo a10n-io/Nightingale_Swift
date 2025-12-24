@@ -45,7 +45,6 @@ public enum LinearFactory {
                 fatalError("Missing Q4 weights for \(name)")
             }
 
-            print("  [FP16-DQ] Loading dequantized from Q4: \(name)")
 
             // Dequantize: reconstruct FP16 weights from Q4
             var dequantized = dequantizeQ4(packed: packedWeight, scales: scales, biases: biases, groupSize: 64, bits: 4)
@@ -54,7 +53,6 @@ public enum LinearFactory {
             // Dequantized weights are in PyTorch format [out_features, in_features]
             if dequantized.shape[0] == outputDim && dequantized.shape[1] == inputDim {
                 dequantized = dequantized.transposed(0, 1)
-                print("  [FP16-DQ] Transposed: \(name) to \(dequantized.shape)")
             }
 
             let linear = Linear(inputDim, outputDim, bias: bias)
@@ -74,7 +72,6 @@ public enum LinearFactory {
                 fatalError("Missing Q4 weights for \(name)")
             }
 
-            print("  [Q4] Loading quantized: \(name)")
 
             // Create QuantizedLinear with positional arguments (no labels for dimensions)
             let qLinear = QuantizedLinear(
@@ -108,7 +105,6 @@ public enum LinearFactory {
                 fatalError("Missing INT8 weights for \(name)")
             }
 
-            print("  [INT8] Loading quantized: \(name)")
 
             // Create QuantizedLinear for INT8
             let qLinear = QuantizedLinear(
@@ -143,9 +139,7 @@ public enum LinearFactory {
             if w.shape[0] == outputDim && w.shape[1] == inputDim {
                 // Weight is in PyTorch format [out, in], transpose to MLX format [in, out]
                 weightToUse = w.transposed(0, 1)
-                print("  [FP16] Loading transposed: \(name) - \(w.shape) -> \(weightToUse.shape)")
             } else {
-                print("  [FP16] Loading standard: \(name) - dtype: \(w.dtype), shape: \(w.shape)")
             }
             // Use update(parameters:) - MLX properties are immutable 'let' constants
             var params: [String: MLXArray] = ["weight": weightToUse]
@@ -154,7 +148,6 @@ public enum LinearFactory {
             }
             linear.update(parameters: ModuleParameters.unflattened(params))
         } else {
-            print("  [INIT] No weight found for: \(name)")
             // Load bias even if no weight found
             if bias, let b = weights["\(name).bias"] {
                 linear.update(parameters: ModuleParameters.unflattened(["bias": b]))
@@ -222,20 +215,15 @@ public enum LinearFactory {
         groupSize: Int,
         bits: Int
     ) -> MLXArray {
-        print("  [DQ] packed shape: \(packed.shape), dtype: \(packed.dtype)")
-        print("  [DQ] scales shape: \(scales.shape), dtype: \(scales.dtype)")
-        print("  [DQ] biases shape: \(biases.shape), dtype: \(biases.dtype)")
 
         let outDim = scales.shape[0]
         let numGroups = scales.shape[1]
         let inDim = numGroups * groupSize
 
-        print("  [DQ] Calculated: outDim=\(outDim), numGroups=\(numGroups), inDim=\(inDim)")
 
         // The packed array uses uint32 where each uint32 contains 8 4-bit values
         // Format: [outDim, inDim/8] with 8 values per uint32
         let packedFlat = packed.flattened().asArray(UInt32.self)
-        print("  [DQ] packedFlat count: \(packedFlat.count), expected: \(outDim * inDim / 8)")
 
         // Unpack: each uint32 contains 8 4-bit values
         var unpackedValues: [UInt32] = []
@@ -249,7 +237,6 @@ public enum LinearFactory {
             }
         }
 
-        print("  [DQ] unpackedValues count: \(unpackedValues.count), expected: \(outDim * inDim)")
 
         // Reshape to [outDim, inDim]
         let unpacked = MLXArray(unpackedValues.map { Float($0) }).reshaped([outDim, inDim])
@@ -269,9 +256,6 @@ public enum LinearFactory {
         // Source: https://ml-explore.github.io/mlx/build/html/python/_autosummary/mlx.core.dequantize.html
         let dequantized = scalesExpanded * unpacked + biasesExpanded
 
-        print("  [DQ] dequantized shape: \(dequantized.shape)")
-        print("  [DQ] dequantized range: [\(dequantized.min().item(Float.self)), \(dequantized.max().item(Float.self))]")
-        print("  [DQ] dequantized mean: \(dequantized.mean().item(Float.self))")
 
         return dequantized
     }

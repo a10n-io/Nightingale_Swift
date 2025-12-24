@@ -214,12 +214,9 @@ public class FlowEmbedding: Module {
         // DEBUG: Check what keys are available
         let linearKey = "\(prefix).linear.weight"
         let normWeightKey = "\(prefix).norm.weight"
-        print("FlowEmbedding init: looking for linearKey='\(linearKey)', has=\(weights[linearKey] != nil)")
-        print("FlowEmbedding init: looking for normWeightKey='\(normWeightKey)', has=\(weights[normWeightKey] != nil)")
 
         // Print all keys matching prefix
         let matchingKeys = weights.keys.filter { $0.hasPrefix(prefix) }.sorted()
-        print("FlowEmbedding init: keys with prefix '\(prefix)': \(matchingKeys.prefix(10))")
 
         // Use LinearFactory to handle quantized weights
         self.linear = LinearFactory.load("\(prefix).linear", inputDim: inputDim, outputDim: outputDim, weights: weights, bias: true)
@@ -231,23 +228,17 @@ public class FlowEmbedding: Module {
         // Load norm weights (not quantized)
         if let w = weights["\(prefix).norm.weight"] {
             norm.update(parameters: ModuleParameters.unflattened(["weight": w]))
-            print("FlowEmbedding: Loaded norm.weight")
         } else {
-            print("FlowEmbedding: WARNING - norm.weight not found at '\(prefix).norm.weight'")
         }
         if let b = weights["\(prefix).norm.bias"] {
             norm.update(parameters: ModuleParameters.unflattened(["bias": b]))
-            print("FlowEmbedding: Loaded norm.bias")
         } else {
-            print("FlowEmbedding: WARNING - norm.bias not found at '\(prefix).norm.bias'")
         }
 
         // Load positional encoding weights
         if let pe = weights["\(prefix).pos_enc.pe"] {
             posEnc.pe = pe
-            print("FlowEmbedding: Loaded pos_enc.pe shape=\(pe.shape), xscale=\(posEnc.xscale)")
         } else {
-            print("FlowEmbedding: WARNING - pos_enc.pe not found, will use computed PE")
         }
     }
 
@@ -282,10 +273,8 @@ public class PreLookaheadLayer: Module {
         // DO NOT transpose weights here to avoid double-transpose bug
         // Conv1d weights will be transposed once in remapS3Keys() and applied via update()
         if let w = weights["\(prefix).conv1.weight"] {
-            print("  Found \(prefix).conv1.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
         }
         if let w = weights["\(prefix).conv2.weight"] {
-            print("  Found \(prefix).conv2.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
         }
     }
 
@@ -332,7 +321,6 @@ public class UpLayer: Module {
         // DO NOT transpose weights here to avoid double-transpose bug
         // Conv1d weights will be transposed once in remapS3Keys() and applied via update()
         if let w = weights["\(prefix).conv.weight"] {
-            print("  Found \(prefix).conv.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
         }
     }
 
@@ -434,7 +422,6 @@ public class FlowEncoder: Module {
             afterNorm.update(parameters: ModuleParameters.unflattened(["bias": b]))
         }
 
-        print("FlowEncoder: Initialized with \(encoders.count) encoders + \(upEncoders.count) up_encoders")
     }
 
     /// Forward pass: speech token embeddings -> mel-like features

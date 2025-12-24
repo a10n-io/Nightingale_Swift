@@ -579,86 +579,50 @@ public class UpsampleEncoder: Module {
     public let afterNorm: LayerNorm
 
     public init(inputDim: Int = 512, outputDim: Int = 512, weights: [String: MLXArray]? = nil) {
-        print("🔧 UpsampleEncoder.init START: inputDim=\(inputDim), outputDim=\(outputDim)"); fflush(stdout)
-
-        print("🔧  [1/10] Creating embedLinear(\(inputDim), \(outputDim))..."); fflush(stdout)
         self.embedLinear = FixedLinear(inputDim, outputDim, name: "UpsampleEncoder.embedLinear")
-        print("🔧  [1/10] ✓ embedLinear created"); fflush(stdout)
 
-        print("🔧  [2/10] Creating embedNorm(dim=\(outputDim)) with identity init..."); fflush(stdout)
         self.embedNorm = LayerNorm(dimensions: outputDim, eps: 1e-5)
-        // CRITICAL FIX: Python's Conv1dSubsampling2 does NOT have a norm layer
         // Initialize as identity transform (gamma=1, beta=0) to avoid signal suppression
         self.embedNorm.update(parameters: ModuleParameters.unflattened([
             "weight": MLXArray.ones([outputDim]),
             "bias": MLXArray.zeros([outputDim])
         ]))
-        print("🔧  [2/10] ✓ embedNorm created with identity init (gamma=1, beta=0)"); fflush(stdout)
 
-        print("🔧  [3/10] Creating posEnc(dModel=\(outputDim))..."); fflush(stdout)
         self.posEnc = EspnetRelPositionalEncoding(dModel: outputDim)
-        print("🔧  [3/10] ✓ posEnc created"); fflush(stdout)
 
-        // FIX: Use PreLookaheadLayer with weight loading instead of random weights
-        print("🔧  [4/10] Creating preLookaheadLayer..."); fflush(stdout)
+        // Use PreLookaheadLayer with weight loading
         if let w = weights {
-            // Use snake_case to match HuggingFace weight keys
             self.preLookaheadLayer = PreLookaheadLayer(dim: outputDim, weights: w, prefix: "encoder.pre_lookahead_layer")
         } else {
             self.preLookaheadLayer = PreLookahead(channels: outputDim)
         }
-        print("🔧  [4/10] ✓ preLookaheadLayer created"); fflush(stdout)
 
-        print("🔧  [5/10] Creating 6 ConformerBlock encoders(embedDim=\(outputDim))..."); fflush(stdout)
         var encs: [ConformerBlock] = []
-        for i in 0..<6 {
-            print("🔧   - Creating encoder[\(i)]..."); fflush(stdout)
+        for _ in 0..<6 {
             encs.append(ConformerBlock(embedDim: outputDim))
-            print("🔧   - encoder[\(i)] created"); fflush(stdout)
         }
         self.encoders = encs
-        print("🔧  [5/10] ✓ All encoders created"); fflush(stdout)
-        
-        // Correctly use Upsample1D matching Python (Repeat + Conv)
-        print("🔧  [6/10] Creating upLayer(channels=\(outputDim), stride=2)..."); fflush(stdout)
+
         self.upLayer = Upsample1D(channels: outputDim, outChannels: outputDim, stride: 2)
-        print("🔧  [6/10] ✓ upLayer created"); fflush(stdout)
-
-        print("🔧  [7/10] Creating upEmbedLinear(\(outputDim), \(outputDim))..."); fflush(stdout)
         self.upEmbedLinear = FixedLinear(outputDim, outputDim, name: "UpsampleEncoder.upEmbedLinear")
-        print("🔧  [7/10] ✓ upEmbedLinear created"); fflush(stdout)
 
-        print("🔧  [8/10] Creating upEmbedNorm(dim=\(outputDim)) with identity init..."); fflush(stdout)
         self.upEmbedNorm = LayerNorm(dimensions: outputDim, eps: 1e-5)
-        // CRITICAL FIX: Python's Conv1dSubsampling2 does NOT have a norm layer
-        // Initialize as identity transform (gamma=1, beta=0) to avoid signal suppression
         self.upEmbedNorm.update(parameters: ModuleParameters.unflattened([
             "weight": MLXArray.ones([outputDim]),
             "bias": MLXArray.zeros([outputDim])
         ]))
-        print("🔧  [8/10] ✓ upEmbedNorm created with identity init (gamma=1, beta=0)"); fflush(stdout)
 
-        print("🔧  [9/10] Creating upPosEnc(dModel=\(outputDim))..."); fflush(stdout)
         self.upPosEnc = EspnetRelPositionalEncoding(dModel: outputDim)
-        print("🔧  [9/10] ✓ upPosEnc created"); fflush(stdout)
 
-        print("🔧  [10/10] Creating 4 ConformerBlock upEncoders(embedDim=\(outputDim))..."); fflush(stdout)
         var upEncs: [ConformerBlock] = []
-        for i in 0..<4 {
-            print("🔧    - Creating upEncoder[\(i)]..."); fflush(stdout)
+        for _ in 0..<4 {
             upEncs.append(ConformerBlock(embedDim: outputDim))
-            print("🔧    - upEncoder[\(i)] created"); fflush(stdout)
         }
         self.upEncoders = upEncs
-        print("🔧  [10/10] ✓ All upEncoders created"); fflush(stdout)
 
-        print("🔧  Creating afterNorm..."); fflush(stdout)
         self.afterNorm = LayerNorm(dimensions: outputDim)
-        print("🔧  ✓ afterNorm created"); fflush(stdout)
 
-        print("🔧  Calling super.init()..."); fflush(stdout)
         super.init()
-        print("🔧 UpsampleEncoder.init COMPLETE"); fflush(stdout)
     }
 
     public func callAsFunction(_ x: MLXArray, seqLen: MLXArray? = nil) -> MLXArray {
@@ -731,112 +695,49 @@ public class UpsampleEncoder: Module {
 
     /// Load trained weights from Python model
     public func load(weights: [String: MLXArray], prefix: String = "encoder") {
-        print("UpsampleEncoder: Loading weights with prefix '\(prefix)'")
-
-        // NOTE: embedLinear weights are loaded via ChatterboxEngine.update()
-        // DO NOT load them here to avoid double-transpose bug
-        if let w = weights["\(prefix).embedLinear.weight"] {
-            print("  Found \(prefix).embedLinear.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
-        }
-
-        // 2. Load embedNorm weights
-        // Load LayerNorm weights if they exist (Python model has these)
+        // Load embedNorm weights
         if let w = weights["\(prefix).embedNorm.weight"] {
-            eval(w)
-            let avgWeight = abs(w).mean().item(Float.self)
-            print("  📊 embedNorm.weight FROM FILE: shape=\(w.shape), range=[\(w.min().item(Float.self)), \(w.max().item(Float.self))], mean=\(avgWeight)")
             embedNorm.update(parameters: ModuleParameters.unflattened(["weight": w]))
-            print("  ✅ Loaded embedNorm.weight")
         }
         if let b = weights["\(prefix).embedNorm.bias"] {
-            eval(b)
-            let avgBias = abs(b).mean().item(Float.self)
-            print("  📊 embedNorm.bias FROM FILE: shape=\(b.shape), range=[\(b.min().item(Float.self)), \(b.max().item(Float.self))], mean=\(avgBias)")
             embedNorm.update(parameters: ModuleParameters.unflattened(["bias": b]))
-            print("  ✅ Loaded embedNorm.bias")
         }
 
-        // 3. Load pos_enc.pe
+        // Load pos_enc.pe
         if let pe = weights["\(prefix).embed.pos_enc.pe"] {
             posEnc.pe = pe
-            print("  ✅ Loaded pos_enc.pe shape=\(pe.shape)")
         }
 
-        // 4. Load pre_lookahead_layer weights (if using PreLookaheadLayer)
-        if let layer = preLookaheadLayer as? PreLookaheadLayer {
-            // PreLookaheadLayer loads weights in its init, so just verify
-            print("  ✅ PreLookaheadLayer weights loaded in init")
-        }
-
-        // 5. Load main encoder blocks (0-5)
+        // Load main encoder blocks (0-5)
         for i in 0..<encoders.count {
             let blockPrefix = "\(prefix).encoders.\(i)"
             encoders[i].load(weights: weights, prefix: blockPrefix)
-            print("  ✅ Loaded encoder block \(i)")
-
-            // Debug: Check first encoder block's feed-forward weights
-            if i == 0 {
-                if let w1Weight = weights["\(blockPrefix).feed_forward.w_1.weight"] {
-                    eval(w1Weight)
-                    print("    DEBUG: encoder[0].ff.w_1.weight: shape=\(w1Weight.shape), range=[\(w1Weight.min().item(Float.self)), \(w1Weight.max().item(Float.self))], mean=\(w1Weight.mean().item(Float.self))")
-                }
-                if let w2Weight = weights["\(blockPrefix).feed_forward.w_2.weight"] {
-                    eval(w2Weight)
-                    print("    DEBUG: encoder[0].ff.w_2.weight: shape=\(w2Weight.shape), range=[\(w2Weight.min().item(Float.self)), \(w2Weight.max().item(Float.self))], mean=\(w2Weight.mean().item(Float.self))")
-                }
-            }
         }
 
-        // NOTE: up_layer.conv weights are loaded later via ChatterboxEngine.update()
-        // DO NOT transpose weights here to avoid double-transpose bug
-        // Conv1d weights will be transposed once in remapS3Keys() and applied via update()
-        if let w = weights["\(prefix).up_layer.conv.weight"] {
-            print("  Found up_layer.conv.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
-        }
-
-        // NOTE: upEmbedLinear weights are loaded via ChatterboxEngine.update()
-        // DO NOT load them here to avoid double-transpose bug
-        if let w = weights["\(prefix).upEmbedLinear.weight"] {
-            print("  Found \(prefix).upEmbedLinear.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
-        }
-        // Load upEmbedNorm weights if they exist (Python model has these)
+        // Load upEmbedNorm weights
         if let w = weights["\(prefix).upEmbedNorm.weight"] {
-            eval(w)
-            let avgWeight = abs(w).mean().item(Float.self)
-            print("  📊 upEmbedNorm.weight FROM FILE: shape=\(w.shape), range=[\(w.min().item(Float.self)), \(w.max().item(Float.self))], mean=\(avgWeight)")
             upEmbedNorm.update(parameters: ModuleParameters.unflattened(["weight": w]))
-            print("  ✅ Loaded upEmbedNorm.weight")
         }
         if let b = weights["\(prefix).upEmbedNorm.bias"] {
-            eval(b)
-            let avgBias = abs(b).mean().item(Float.self)
-            print("  📊 upEmbedNorm.bias FROM FILE: shape=\(b.shape), range=[\(b.min().item(Float.self)), \(b.max().item(Float.self))], mean=\(avgBias)")
             upEmbedNorm.update(parameters: ModuleParameters.unflattened(["bias": b]))
-            print("  ✅ Loaded upEmbedNorm.bias")
         }
         if let pe = weights["\(prefix).up_embed.pos_enc.pe"] {
             upPosEnc.pe = pe
-            print("  ✅ Loaded up_embed.pos_enc.pe shape=\(pe.shape)")
         }
 
-        // 8. Load up encoder blocks (0-3)
+        // Load up encoder blocks (0-3)
         for i in 0..<upEncoders.count {
             let blockPrefix = "\(prefix).up_encoders.\(i)"
             upEncoders[i].load(weights: weights, prefix: blockPrefix)
-            print("  ✅ Loaded up_encoder block \(i)")
         }
 
-        // 9. Load after_norm weights
+        // Load after_norm weights
         if let w = weights["\(prefix).after_norm.weight"] {
             afterNorm.update(parameters: ModuleParameters.unflattened(["weight": w]))
-            print("  ✅ Loaded after_norm.weight")
         }
         if let b = weights["\(prefix).after_norm.bias"] {
             afterNorm.update(parameters: ModuleParameters.unflattened(["bias": b]))
-            print("  ✅ Loaded after_norm.bias")
         }
-
-        print("UpsampleEncoder: Weight loading complete")
     }
 }
 
@@ -2447,35 +2348,17 @@ public class S3Gen: Module {
         let config = S3GenConfig()
         self.inputEmbedding = Embedding(embeddingCount: config.vocabSize, dimensions: config.inputDim)
 
-        // DEBUG: Check what keys are in flowWeights
-        print("DEBUG S3Gen.init: flowWeights has \(flowWeights.count) total keys"); fflush(stdout)
-
-        // Print first 50 keys to see what we have
-        let allKeys = Array(flowWeights.keys.sorted().prefix(50))
-        print("DEBUG S3Gen.init: First 50 keys:"); fflush(stdout)
-        for key in allKeys {
-            print("  \(key)"); fflush(stdout)
-        }
-
-        let encoderRelatedKeys = flowWeights.keys.filter { $0.contains("encoder") }.prefix(30).sorted()
-        print("DEBUG S3Gen.init: Encoder-related keys (\(encoderRelatedKeys.count)):"); fflush(stdout)
-        for key in encoderRelatedKeys {
-            print("  \(key)"); fflush(stdout)
-        }
-
         // Load input_embedding weights
         for (key, value) in flowWeights {
             if key.hasPrefix("s3gen.flow.input_embedding.") {
                 let remappedKey = key.replacingOccurrences(of: "s3gen.flow.input_embedding.", with: "")
                 if remappedKey == "weight" {
                     inputEmbedding.update(parameters: ModuleParameters.unflattened(["weight": value]))
-                    print("DEBUG S3Gen: Loaded inputEmbedding.weight")
                 }
             } else if key.hasPrefix("flow.input_embedding.") {
                 let remappedKey = key.replacingOccurrences(of: "flow.input_embedding.", with: "")
                 if remappedKey == "weight" {
                     inputEmbedding.update(parameters: ModuleParameters.unflattened(["weight": value]))
-                    print("DEBUG S3Gen: Loaded inputEmbedding.weight")
                 }
             }
         }
@@ -2508,72 +2391,23 @@ public class S3Gen: Module {
             encoderWeights[remappedKey] = value
         }
 
-        print("DEBUG S3Gen: Creating UpsampleEncoder with \(encoderWeights.count) weights"); fflush(stdout)
-
-        // Check what embed-related keys exist after remapping
-        let embedKeys = encoderWeights.keys.filter { $0.contains("embed") }.sorted()
-        print("DEBUG S3Gen: Embed-related keys (\(embedKeys.count)):"); fflush(stdout)
-        for key in embedKeys.prefix(20) {
-            if let arr = encoderWeights[key] {
-                print("  \(key): shape=\(arr.shape)"); fflush(stdout)
-            }
-        }
-
-        // Check specifically for norm and pos_enc keys
-        let normKeys = encoderWeights.keys.filter { $0.contains("norm") && $0.contains("embed") }.sorted()
-        print("DEBUG S3Gen: Norm keys for embed (\(normKeys.count)): \(normKeys)"); fflush(stdout)
-
-        let posEncKeys = encoderWeights.keys.filter { $0.contains("pos_enc.pe") }
-        print("DEBUG S3Gen: Position encoding keys (\(posEncKeys.count)): \(posEncKeys.sorted())"); fflush(stdout)
-        for key in posEncKeys {
-            if let pe = encoderWeights[key] {
-                print("  \(key): shape=\(pe.shape)"); fflush(stdout)
-            }
-        }
         // Create UpsampleEncoder with weights for PreLookaheadLayer
         self.encoder = UpsampleEncoder(inputDim: config.inputDim, outputDim: config.inputDim, weights: encoderWeights)
-        print("DEBUG S3Gen: UpsampleEncoder created, about to call .load()"); fflush(stdout)
-        // Load all other weights using the load() method
         self.encoder.load(weights: encoderWeights, prefix: "encoder")
-        print("DEBUG S3Gen: encoder.load() completed"); fflush(stdout)
 
-        print("DEBUG S3Gen: Creating encoderProj FixedLinear(\(config.inputDim), \(config.melChannels))..."); fflush(stdout)
         self.encoderProj = FixedLinear(config.inputDim, config.melChannels, name: "S3Gen.encoderProj")
-        print("DEBUG S3Gen: encoderProj created"); fflush(stdout)
-        // NOTE: encoderProj weights are loaded later in ChatterboxEngine via update()
-        // DO NOT load weights here to avoid double-transpose bug
-        // Weights will be transposed once in remapS3Keys() and applied via update()
-        print("DEBUG S3Gen: encoderProj will be loaded via ChatterboxEngine.update()"); fflush(stdout)
-
-        print("DEBUG S3Gen: Creating spkEmbedAffine FixedLinear(192, \(config.melChannels))..."); fflush(stdout)
         self.spkEmbedAffine = FixedLinear(192, config.melChannels, name: "S3Gen.spkEmbedAffine")
-        print("DEBUG S3Gen: spkEmbedAffine created"); fflush(stdout)
 
-        // NOTE: spkEmbedAffine weights are loaded later in ChatterboxEngine via update()
-        // DO NOT load weights here to avoid double-transpose bug
-        // Weights will be transposed once in remapS3Keys() and applied via update()
-        print("DEBUG S3Gen: spkEmbedAffine will be loaded via ChatterboxEngine.update()"); fflush(stdout)
-
-        print("DEBUG S3Gen: Creating FlowMatchingDecoder..."); fflush(stdout)
         self.decoder = FlowMatchingDecoder(config: config)
-        print("DEBUG S3Gen: FlowMatchingDecoder created"); fflush(stdout)
-        print("DEBUG S3Gen: Creating Mel2Wav vocoder..."); fflush(stdout)
         self.vocoder = Mel2Wav()
-        print("DEBUG S3Gen: Mel2Wav vocoder created"); fflush(stdout)
+
         // Generate fixed noise once at init (matching Python's CausalConditionalCFM)
-        print("DEBUG S3Gen: Generating fixed noise..."); fflush(stdout)
         MLXRandom.seed(0)
         self.fixedNoise = MLXRandom.normal([1, 80, 50 * 300])
-        print("DEBUG S3Gen: Fixed noise generated"); fflush(stdout)
-        print("DEBUG S3Gen: Calling super.init()..."); fflush(stdout)
         super.init()
-        print("DEBUG S3Gen: super.init() complete"); fflush(stdout)
 
         // Load decoder weights with comprehensive key remapping
-        print("DEBUG S3Gen: Loading decoder weights..."); fflush(stdout)
         var decoderWeights: [String: MLXArray] = [:]
-        var transposedLinearCount = 0
-        var transposedConv1dCount = 0
         for (key, value) in flowWeights {
             if key.contains("decoder.estimator") {
                 // Remap: flow.decoder.estimator.* -> (no prefix, decoder is implied)
@@ -2626,7 +2460,6 @@ public class S3Gen: Module {
                               !remappedKey.contains(".conv.") && !remappedKey.contains("norm.")
                 if isLinear {
                     finalW = finalW.transposed()
-                    transposedLinearCount += 1
                 }
 
                 // Transpose Conv1d weights from PyTorch [out, in, kernel] to MLX [out, kernel, in]
@@ -2634,113 +2467,21 @@ public class S3Gen: Module {
                               !remappedKey.contains("norm") && !remappedKey.contains("embedding")
                 if isConv1d {
                     finalW = finalW.transposed(0, 2, 1)
-                    transposedConv1dCount += 1
                 }
 
                 decoderWeights[remappedKey] = finalW
             }
         }
-        print("DEBUG S3Gen: Found \(decoderWeights.count) decoder weight keys"); fflush(stdout)
-        print("DEBUG S3Gen: Transposed \(transposedLinearCount) Linear weights, \(transposedConv1dCount) Conv1d weights"); fflush(stdout)
+
         if decoderWeights.count > 0 {
-            let sampleKeys = Array(decoderWeights.keys.sorted().prefix(10))
-            print("DEBUG S3Gen: Sample decoder keys (first 10):"); fflush(stdout)
-            for k in sampleKeys {
-                print("  \(k)"); fflush(stdout)
-            }
-
-            // Check if timeMLP keys are present
-            let timeMlpKeys = decoderWeights.keys.filter { $0.contains("timeMLP") }.sorted()
-            print("DEBUG S3Gen: timeMLP keys (\(timeMlpKeys.count)): \(timeMlpKeys)"); fflush(stdout)
-
-            // Also print what keys the decoder Module expects
-            let decoderParams = self.decoder.parameters().flattened()
-            let allDecoderParamKeys = decoderParams.map { $0.0 }.sorted()
-            print("DEBUG S3Gen: Decoder module has \(allDecoderParamKeys.count) parameter keys"); fflush(stdout)
-            let decoderParamKeys = Array(allDecoderParamKeys.prefix(10))
-            print("DEBUG S3Gen: Decoder module keys (first 10):"); fflush(stdout)
-            for k in decoderParamKeys {
-                print("  \(k)"); fflush(stdout)
-            }
-
-            // Check if timeMLP keys exist in module
-            let moduleTimeMlpKeys = allDecoderParamKeys.filter { $0.contains("timeMLP") }
-            print("DEBUG S3Gen: Module timeMLP keys (\(moduleTimeMlpKeys.count)): \(moduleTimeMlpKeys)"); fflush(stdout)
-
-            // Check if transformer keys exist in decoderWeights (what we're loading)
-            let tfmrKeysInWeights = decoderWeights.keys.filter { $0.contains("transformers") }.sorted()
-            print("DEBUG S3Gen: Transformer keys in decoderWeights (\(tfmrKeysInWeights.count)):"); fflush(stdout)
-            for k in Array(tfmrKeysInWeights.prefix(10)) {
-                print("  \(k)"); fflush(stdout)
-            }
-
-            // Check if transformer keys exist in module
-            let moduleTfmrKeys = allDecoderParamKeys.filter { $0.contains("transformers") }
-            print("DEBUG S3Gen: Module transformer keys (\(moduleTfmrKeys.count)):"); fflush(stdout)
-            for k in Array(moduleTfmrKeys.sorted().prefix(10)) {
-                print("  \(k)"); fflush(stdout)
-            }
-
-            // Check a weight value before update
-            eval(self.decoder.timeMLP.linear1.weight)
-            let timeMlpWeightBefore = self.decoder.timeMLP.linear1.weight[0, 0..<5].asArray(Float.self)
-            print("DEBUG S3Gen: timeMLP.linear1.weight[0,:5] BEFORE update: \(timeMlpWeightBefore)"); fflush(stdout)
-
             self.decoder.update(parameters: ModuleParameters.unflattened(decoderWeights))
-
-            // Check the same weight after update
-            eval(self.decoder.timeMLP.linear1.weight)
-            let timeMlpWeightAfter = self.decoder.timeMLP.linear1.weight[0, 0..<5].asArray(Float.self)
-            print("DEBUG S3Gen: timeMLP.linear1.weight[0,:5] AFTER update: \(timeMlpWeightAfter)"); fflush(stdout)
-
-            // Check if they're different
-            let changed = timeMlpWeightBefore != timeMlpWeightAfter
-
-            // CRITICAL: Check transformer attention weights to verify loading
-            let tfmr0 = self.decoder.downBlocks[0].transformers[0]
-            eval(tfmr0.attention.queryProj.weight)
-            let qWeight = tfmr0.attention.queryProj.weight
-            print("DEBUG S3Gen: downBlocks[0].transformers[0].attention.queryProj.weight shape: \(qWeight.shape)"); fflush(stdout)
-            print("DEBUG S3Gen: downBlocks[0].transformers[0].attention.queryProj.weight[0,:5]: \(qWeight[0, 0..<5].asArray(Float.self))"); fflush(stdout)
-            print("DEBUG S3Gen: downBlocks[0].transformers[0].attention.queryProj.weight range: [\(qWeight.min().item(Float.self)), \(qWeight.max().item(Float.self))]"); fflush(stdout)
-            print("DEBUG S3Gen: Weights changed: \(changed)"); fflush(stdout)
-
-            // Check ResNet MLP weights (THE SMOKING GUN)
-            print("DEBUG S3Gen: About to check ResNet MLP weights..."); fflush(stdout)
-            let resnet0 = self.decoder.downBlocks[0].resnet
-            print("DEBUG S3Gen: Got resnet0"); fflush(stdout)
-            eval(resnet0.mlpLinear.weight)
-            print("DEBUG S3Gen: Evaluated mlpLinear.weight"); fflush(stdout)
-            let mlpW = resnet0.mlpLinear.weight
-            print("DEBUG S3Gen: 🔍 ResNet[0] MLP Weight Shape: \(mlpW.shape) (should be [1024, 256])"); fflush(stdout)
-            print("DEBUG S3Gen: 🔍 ResNet[0] MLP weight[0,:5]: \(mlpW[0, 0..<5].asArray(Float.self))"); fflush(stdout)
-            print("DEBUG S3Gen: 🔍 ResNet[0] MLP weight[:5,0]: \(mlpW[0..<5, 0].asArray(Float.self))"); fflush(stdout)
-            print("DEBUG S3Gen: 🔍 Expected [0,:5] = [0.0115, 0.0138, -0.0350, 0.0076, -0.0255]"); fflush(stdout)
-            print("DEBUG S3Gen: 🔍 Expected [:5,0] = [0.0115, 0.0098, -0.0121, -0.0090, 0.0022]"); fflush(stdout)
-
-            // Check ResNet resConv weights
-            print("DEBUG S3Gen: Checking ResNet resConv weights..."); fflush(stdout)
-            eval(resnet0.resConv.weight)
-            let resConvW = resnet0.resConv.weight
-            print("DEBUG S3Gen: 🔍 ResNet[0] resConv Weight Shape: \(resConvW.shape)"); fflush(stdout)
-            print("DEBUG S3Gen: 🔍 ResNet[0] resConv weight[0,0,:]: \(resConvW[0, 0, 0..<min(5, resConvW.shape[2])].asArray(Float.self))"); fflush(stdout)
-
-            print("DEBUG S3Gen: Decoder weights loaded via decoder.update()"); fflush(stdout)
-        } else {
-            print("⚠️ WARNING: No decoder weights found in flowWeights!"); fflush(stdout)
         }
 
         // =======================================================================================
         // LOAD VOCODER WEIGHTS
         // =======================================================================================
         if let vocoderWeights = vocoderWeights {
-            print("DEBUG S3Gen: Loading vocoder weights..."); fflush(stdout)
-
             var processedVocoderWeights: [String: MLXArray] = [:]
-            var transposedConv1dCount = 0
-            var transposedConvTCount = 0
-            var transposedLinearCount = 0
-            var weightNormCount = 0
 
             // Group weight_norm parametrizations by base key
             var weightNormGroups: [String: (original0: MLXArray?, original1: MLXArray?)] = [:]
@@ -2796,7 +2537,6 @@ public class S3Gen: Module {
             // Process weight_norm groups: combine original0 and original1
             for (baseKey, pair) in weightNormGroups {
                 guard let original0 = pair.original0, let original1 = pair.original1 else {
-                    print("⚠️ WARNING: Incomplete weight_norm pair for \(baseKey)"); fflush(stdout)
                     continue
                 }
 
@@ -2833,25 +2573,17 @@ public class S3Gen: Module {
 
                 // Transpose Conv1d: PyTorch [Out, In, Kernel] -> MLX [Out, Kernel, In]
                 if finalWeight.ndim == 3 && !remappedKey.contains("ups.") {
-                    let before = finalWeight.shape
                     finalWeight = finalWeight.transposed(0, 2, 1)
-                    let after = finalWeight.shape
-                    if remappedKey.contains("convPre") || remappedKey.contains("f0Predictor") {
-                        print("DEBUG: Transposed weight_norm Conv1d \(remappedKey): \(before) -> \(after)"); fflush(stdout)
-                    }
-                    transposedConv1dCount += 1
                 }
 
                 // Transpose ConvTranspose1d: PyTorch [In, Out, Kernel] -> MLX [Out, Kernel, In]
                 if remappedKey.contains("ups.") && finalWeight.ndim == 3 {
                     finalWeight = finalWeight.transposed(1, 2, 0)
-                    transposedConvTCount += 1
                 }
 
                 let finalKey = remappedKey + ".weight"
                 processedVocoderWeights[finalKey] = finalWeight
-                weightNormProcessedKeys.insert(finalKey)  // Track that this came from weight_norm
-                weightNormCount += 1
+                weightNormProcessedKeys.insert(finalKey)
             }
 
             // Transpose non-weight_norm weights
@@ -2869,7 +2601,6 @@ public class S3Gen: Module {
                 let isLinear = finalW.ndim == 2 && !key.contains("conv")
                 if isLinear {
                     finalW = finalW.transposed()
-                    transposedLinearCount += 1
                     processedVocoderWeights[key] = finalW
                 }
 
@@ -2877,7 +2608,6 @@ public class S3Gen: Module {
                 let isConv1d = finalW.ndim == 3 && !key.contains("ups.")
                 if isConv1d {
                     finalW = finalW.transposed(0, 2, 1)
-                    transposedConv1dCount += 1
                     processedVocoderWeights[key] = finalW
                 }
 
@@ -2885,45 +2615,13 @@ public class S3Gen: Module {
                 let isConvT = key.contains("ups.") && finalW.ndim == 3
                 if isConvT {
                     finalW = finalW.transposed(1, 2, 0)
-                    transposedConvTCount += 1
                     processedVocoderWeights[key] = finalW
                 }
             }
 
-            print("DEBUG S3Gen: Vocoder weights processed:"); fflush(stdout)
-            print("  Total keys: \(processedVocoderWeights.count)"); fflush(stdout)
-            print("  Weight norm combined: \(weightNormCount)"); fflush(stdout)
-            print("  Conv1d transposed: \(transposedConv1dCount)"); fflush(stdout)
-            print("  ConvTranspose1d transposed: \(transposedConvTCount)"); fflush(stdout)
-            print("  Linear transposed: \(transposedLinearCount)"); fflush(stdout)
-
             // Apply weights to vocoder
             self.vocoder.update(parameters: ModuleParameters.unflattened(processedVocoderWeights))
-            print("DEBUG S3Gen: Vocoder weights loaded via vocoder.update()"); fflush(stdout)
-
-            // Verify weights actually loaded by checking a known weight
-            print("DEBUG S3Gen: Verifying vocoder weights..."); fflush(stdout)
-            let convPreW = self.vocoder.convPre.weight
-            eval(convPreW)
-            print("DEBUG S3Gen: 🔍 Vocoder convPre.weight shape: \(convPreW.shape)"); fflush(stdout)
-            print("DEBUG S3Gen: 🔍 Vocoder convPre.weight[0,0,:5]: \(convPreW[0, 0, 0..<5].asArray(Float.self))"); fflush(stdout)
-
-            let mSourceW = self.vocoder.mSource.linear.weight
-            eval(mSourceW)
-            print("DEBUG S3Gen: 🔍 Vocoder mSource.linear.weight shape: \(mSourceW.shape)"); fflush(stdout)
-            print("DEBUG S3Gen: 🔍 Vocoder mSource.linear.weight values: \(mSourceW.flattened().asArray(Float.self))"); fflush(stdout)
-            print("DEBUG S3Gen:    Expected: [-0.0012, -0.0003, -0.0004, 0.0011, 0.0014, 0.0018, -0.0004, -0.0010, -0.0019]"); fflush(stdout)
-
-            // Verify sourceResBlocks weights
-            let srcRB0C1W = self.vocoder.sourceResBlocks[0].convs1[0].weight
-            eval(srcRB0C1W)
-            print("DEBUG S3Gen: 🔍 sourceResBlocks[0].convs1[0].weight shape: \(srcRB0C1W.shape)"); fflush(stdout)
-            print("DEBUG S3Gen: 🔍 sourceResBlocks[0].convs1[0].weight[0,0,:5]: \(srcRB0C1W[0, 0, 0..<5].asArray(Float.self))"); fflush(stdout)
-        } else {
-            print("⚠️ WARNING: No vocoder weights provided!"); fflush(stdout)
         }
-
-        print("DEBUG S3Gen: S3Gen.init COMPLETE"); fflush(stdout)
     }
 
     // Legacy support - DEPRECATED: Use init(flowWeights:vocoderWeights:) instead
@@ -3460,24 +3158,18 @@ public class S3Gen: Module {
         let x = inputEmbedding(clippedInputs)
         // Encoder outputs [1, T, 512], need to project to [1, T, 80]
         var h = encoder(x)
-        print("DEBUG generateWithMel: encoder returned h.shape = \(h.shape)")
 
-        // CRITICAL: Force CPU roundtrip to break MLX computation graph
-        // This severs the link between encoder's 317-length mask and decoder's 634-length operations
-        print("DEBUG generateWithMel: Breaking computation graph with CPU roundtrip...")
-        let hData = h.asArray(Float.self)  // Download to CPU
+        // Force CPU roundtrip to break MLX computation graph
+        let hData = h.asArray(Float.self)
         let hShape = h.shape
-        h = MLXArray(hData, hShape)  // Re-upload as fresh tensor with no graph history
-        print("DEBUG generateWithMel: h graph severed, shape=\(h.shape)")
+        h = MLXArray(hData, hShape)
 
         var mu = encoderProj(h)
-        print("DEBUG generateWithMel: encoderProj returned mu.shape = \(mu.shape)")
 
         // Force CPU roundtrip for mu as well
-        let muData = mu.asArray(Float.self)  // Download to CPU
+        let muData = mu.asArray(Float.self)
         let muShape = mu.shape
-        mu = MLXArray(muData, muShape)  // Re-upload as fresh tensor
-        print("DEBUG generateWithMel: mu graph severed, shape=\(mu.shape)")
+        mu = MLXArray(muData, muShape)
 
         let promptMel = promptFeat
         let L_pm = promptMel.shape[1]
@@ -3490,9 +3182,6 @@ public class S3Gen: Module {
         let condsData = conds.asArray(Float.self)
         let condsShape = conds.shape
         conds = MLXArray(condsData, condsShape)
-        print("DEBUG generateWithMel: conds graph severed, shape=\(conds.shape)")
-
-        print("DEBUG generateWithMel: mu.shape = \(mu.shape), L_pm = \(L_pm), L_new = \(L_new), L_total = \(L_total)")
 
         var xt = fixedNoise[0..., 0..., 0..<L_total]
 
@@ -3511,11 +3200,8 @@ public class S3Gen: Module {
         eval(baseMask)  // Force evaluation of base mask
 
         // Explicit broadcast to batch size (will be 2 due to CFG in ODE loop)
-        // This is safe and zero-cost - broadcasting is a view operation in MLX
-        let mask = broadcast(baseMask, to: [1, 1, L_total])  // Keep as [1, 1, L] for now, will broadcast in loop
+        let mask = broadcast(baseMask, to: [1, 1, L_total])
         eval(mask)
-        print("DEBUG generateWithMel: Created mask with explicit broadcast, shape=\(mask.shape), L_total=\(L_total)")
-        fflush(stdout)
 
         let nTimesteps = 10
         let cfgRate: Float = 0.7  // Match Python decoder CFG
@@ -3547,29 +3233,8 @@ public class S3Gen: Module {
             let maskIn = broadcast(mask, to: [2, 1, L_total])
             eval(maskIn)  // Force evaluation of the broadcasted mask
 
-            if step == 1 {
-                print("DEBUG generateWithMel: ODE step \(step)")
-                print("  xIn.shape = \(xIn.shape)")
-                print("  muIn.shape = \(muIn.shape)")
-                print("  spkIn.shape = \(spkIn.shape)")
-                print("  condIn.shape = \(condIn.shape)")
-                print("  tIn.shape = \(tIn.shape)")
-                print("  maskIn.shape = \(maskIn.shape) (explicitly broadcasted)")
-                print("DEBUG generateWithMel: About to call decoder...")
-                print("⚠️  WARNING: Mask disabled due to MLX operator cache bug")
-                print("    Audio will be ~1.5 dB quieter than expected")
-                fflush(stdout)
-            }
-
             // WORKAROUND: Disable mask entirely due to MLX operator cache bug
-            // Even with CPU roundtrips and explicit broadcasts, MLX's cached operators
-            // from 260-length sequences contaminate 520-length operations
             let vBatch = decoder(x: xIn, mu: muIn, t: tIn, speakerEmb: spkIn, cond: condIn, mask: nil)
-
-            if step == 1 {
-                print("DEBUG generateWithMel: Decoder returned!")
-                fflush(stdout)
-            }
             let vCond = vBatch[0].expandedDimensions(axis: 0)
             let vUncond = vBatch[1].expandedDimensions(axis: 0)
             let v = (1.0 + cfgRate) * vCond - cfgRate * vUncond

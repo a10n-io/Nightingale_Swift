@@ -122,7 +122,6 @@ public class RelPositionMultiHeadAttention: Module {
         self.scale = 1.0 / sqrt(Float(dHead))
 
         // 🔍 DEBUG: Print ALL RelPositionMultiHeadAttention initializations
-        print("🔍 RelPosAttn.init: dModel=\(dModel), numHeads=\(numHeads), dHead=\(dHead)")
         fflush(stdout)
 
         // 🚨 RED HANDED CHECK

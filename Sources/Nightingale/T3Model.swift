@@ -913,7 +913,6 @@ public class T3Model: Module {
         self.norm = RMSNorm(dims: config.hiddenSize, eps: config.rmsNormEps)
 
         // Load final norm weight
-        print("🔍 Loading final norm weight..."); fflush(stdout)
         print("   Available keys containing 'norm': \(weights.keys.filter { $0.contains("norm") })")
         fflush(stdout)
         print("   About to access weights[\"norm.weight\"]..."); fflush(stdout)
@@ -1177,7 +1176,6 @@ public class T3Model: Module {
         if isInitialPass {
             eval(h)
             print("\n" + String(repeating: "=", count: 60))
-            print("🔬 CHECKPOINT: Final Block Output (Before Norm)")
             print(String(repeating: "=", count: 60))
             print("  Shape: \(h.shape)")
 
@@ -1212,7 +1210,6 @@ public class T3Model: Module {
         // 🔬 FINAL NORM DIAGNOSTICS (Before applying norm)
         if isInitialPass {
             print("\n" + String(repeating: "=", count: 60))
-            print("🔬 FINAL NORM DIAGNOSTICS")
             print(String(repeating: "=", count: 60))
 
             // 1. Check Weights
@@ -1256,7 +1253,6 @@ public class T3Model: Module {
         if isInitialPass {
             eval(normedOutput)
             print("\n" + String(repeating: "=", count: 60))
-            print("🔬 CHECKPOINT: Final Norm Output")
             print(String(repeating: "=", count: 60))
             print("  Shape: \(normedOutput.shape)")
 
@@ -1339,11 +1335,6 @@ public class T3Model: Module {
         topP: Float = 1.0,               // Python: top_p=1.0
         minP: Float = 0.05               // Python: min_p=0.05
     ) -> [Int] {
-        print("🚨🚨🚨 LAYER 0 DEBUG BUILD \(Date()) 🚨🚨🚨")
-        print("DEBUG T3: generate() called with CFG weight: \(cfgWeight)")
-        print("DEBUG T3: textTokens shape: \(textTokens.shape)")
-        print("DEBUG T3: speakerEmb shape: \(speakerEmb.shape)")
-        print("DEBUG T3: condTokens shape: \(condTokens.shape)")
 
         // ============================================
         // BUILD CONDITIONING: [speaker | perceiver | emotion]
@@ -1353,7 +1344,6 @@ public class T3Model: Module {
         // 1. Speaker embedding projection: [1, 256] -> [1, 1, 1024] (single token prefix!)
         let spkProj = speakerProj(speakerEmb)  // [1, 1024]
         let spkToken = spkProj.expandedDimensions(axis: 1)  // [1, 1, 1024]
-        print("DEBUG T3: spkToken shape: \(spkToken.shape)")
 
         // 2. Embed conditioning speech tokens
         let condLen = condTokens.shape[1]
@@ -1364,11 +1354,9 @@ public class T3Model: Module {
         let perceiverOutput: MLXArray
         if let perc = perceiver {
             perceiverOutput = perc(condSpeechEmb)
-            print("DEBUG T3: Perceiver compressed \(condLen) -> \(perceiverOutput.shape[1]) tokens")
         } else {
             // Fallback if no perceiver: use raw conditioning (not recommended)
             perceiverOutput = condSpeechEmb
-            print("DEBUG T3: WARNING - No Perceiver, using raw \(condLen) tokens")
         }
 
         // 4. Emotion conditioning: [1] -> [1, 1, 1024]
@@ -1376,7 +1364,6 @@ public class T3Model: Module {
         if let emotionFC = emotionAdvFC {
             let emotionInput = MLXArray([emotionValue]).reshaped([1, 1, 1])
             emotionToken = emotionFC(emotionInput)  // [1, 1, 1024]
-            print("DEBUG T3: emotionToken shape: \(emotionToken.shape)")
         } else {
             // No emotion conditioning
             emotionToken = MLXArray.zeros([1, 0, config.hiddenSize])
@@ -1385,14 +1372,12 @@ public class T3Model: Module {
         // 5. Concatenate: [speaker(1) | perceiver(32) | emotion(1)]
         let condEmb = concatenated([spkToken, perceiverOutput, emotionToken], axis: 1)
         let finalCondLen = condEmb.shape[1]
-        print("DEBUG T3: Final conditioning length: \(finalCondLen) (expected ~34)")
 
         // 🔬 CONDITIONING DEBUG: Check what we're feeding to transformer
         eval(condEmb)
         let cond_pos0 = condEmb[0, 0, 0..<5]
         let cond_pos1 = condEmb[0, 1, 0..<5]
         eval(cond_pos0, cond_pos1)
-        print("🔬 CONDITIONING EMBEDDINGS:")
         print("   Position 0 (speaker): \(cond_pos0.asArray(Float.self))")
         print("   Position 1 (perceiver[0]): \(cond_pos1.asArray(Float.self))")
         print("   Python Pos 0 reference: [-0.006982, -0.016019, -0.012832, 0.014774, -0.018492]")
@@ -1428,7 +1413,6 @@ public class T3Model: Module {
         let (B, T_text, C) = (textEmbedding.shape[0], textEmbedding.shape[1], textEmbedding.shape[2])
         let uncondTokenEmb = MLXArray.zeros([B, T_text, C], dtype: textEmbedding.dtype)
         let uncondTextEmbedding = uncondTokenEmb + textPosEmb(textPositions)  // Add positional embeddings!
-        print("DEBUG T3: Created uncondTextEmbedding: zeros (token) + positional = \(uncondTextEmbedding.shape), dtype \(uncondTextEmbedding.dtype)")
 
         // BOS token uses speech position 0 (Python: get_fixed_embedding(0))
         var currentToken = startSpeechToken
@@ -1452,10 +1436,8 @@ public class T3Model: Module {
         let inputEmb: MLXArray
         if useCFG {
             inputEmb = concatenated([condWithDoubleBos, uncondWithDoubleBos], axis: 0)
-            print("DEBUG T3: Using CFG - batch size 2 (with double BOS fix)")
         } else {
             inputEmb = condWithDoubleBos
-            print("DEBUG T3: No CFG - batch size 1 (with double BOS fix)")
         }
 
         // Initialize cache (one set per layer, handles batch internally)
@@ -1473,7 +1455,6 @@ public class T3Model: Module {
             textTokensSlice: (textStart, textEnd),
             eosIdx: stopSpeechToken
         )
-        print("DEBUG T3: AlignmentStreamAnalyzer initialized - text slice (\(textStart), \(textEnd))")
 
         // ============================================
         // CREATE CAUSAL MASK (fully causal like Python's LlamaModel)
@@ -1542,7 +1523,6 @@ public class T3Model: Module {
         // ============================================
         // LAYER 1 DETAILED INSTRUMENTATION
         // ============================================
-        print("🔍 RUNNING DETAILED LAYER 1 INSTRUMENTATION...")
         print(String(repeating: "=", count: 60))
 
         // Fresh caches for clean debug
