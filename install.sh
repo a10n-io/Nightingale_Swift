@@ -93,11 +93,6 @@ echo -e "${GREEN}✓${NC} Code downloaded"
 
 cd "$INSTALL_DIR"
 
-# Download models and voices from Google Drive
-echo -e "${BLUE}==>${NC} Downloading AI models & voices (~2.5GB, this may take a few minutes)..."
-
-ASSETS_ZIP="/tmp/nightingale_assets.zip"
-
 # Function to download large files from Google Drive
 download_gdrive() {
     local file_id=$1
@@ -128,35 +123,42 @@ download_gdrive() {
         --progress-bar
 }
 
-download_gdrive "$ASSETS_GDRIVE_ID" "$ASSETS_ZIP"
+# Check if models already exist
+if [ -f "models/chatterbox/s3gen.safetensors" ]; then
+    echo -e "${GREEN}✓${NC} Models already installed, skipping download"
+else
+    # Download models and voices from Google Drive
+    echo -e "${BLUE}==>${NC} Downloading AI models & voices (~2.5GB, this may take a few minutes)..."
 
-# Extract the zip
-if [ -f "$ASSETS_ZIP" ]; then
-    echo -e "${BLUE}==>${NC} Extracting assets..."
-    unzip -q "$ASSETS_ZIP" -d /tmp/nightingale_extract
+    ASSETS_ZIP="/tmp/nightingale_assets.zip"
+    download_gdrive "$ASSETS_GDRIVE_ID" "$ASSETS_ZIP"
 
-    # Move contents from any subfolder (handles "Model + Voices" folder in zip)
-    if [ -d /tmp/nightingale_extract ]; then
-        # Find and move models and baked_voices to install dir
-        find /tmp/nightingale_extract -type d -name "models" -exec cp -r {} "$INSTALL_DIR/" \;
-        find /tmp/nightingale_extract -type d -name "baked_voices" -exec cp -r {} "$INSTALL_DIR/" \;
-        rm -rf /tmp/nightingale_extract
+    # Extract the zip
+    if [ -f "$ASSETS_ZIP" ]; then
+        echo -e "${BLUE}==>${NC} Extracting assets..."
+        unzip -q "$ASSETS_ZIP" -d /tmp/nightingale_extract
+
+        # Move contents from any subfolder (handles "Model + Voices" folder in zip)
+        if [ -d /tmp/nightingale_extract ]; then
+            find /tmp/nightingale_extract -type d -name "models" -exec cp -r {} "$INSTALL_DIR/" \;
+            find /tmp/nightingale_extract -type d -name "baked_voices" -exec cp -r {} "$INSTALL_DIR/" \;
+            rm -rf /tmp/nightingale_extract
+        fi
+
+        rm -f "$ASSETS_ZIP"
+        echo -e "${GREEN}✓${NC} Models and voices installed"
+    else
+        echo -e "${RED}✗${NC} Download failed. Please check your internet connection."
+        exit 1
     fi
 
-    rm -f "$ASSETS_ZIP"
-    echo -e "${GREEN}✓${NC} Models and voices installed"
-else
-    echo -e "${RED}✗${NC} Download failed. Please check your internet connection."
-    exit 1
-fi
-
-# Verify files exist
-if [ ! -f "models/chatterbox/s3gen.safetensors" ]; then
-    echo -e "${RED}✗${NC} Model files not found after extraction."
-    echo "   Expected: models/chatterbox/s3gen.safetensors"
-    echo "   Found:"
-    ls -la models/ 2>/dev/null || echo "   (models/ directory not found)"
-    exit 1
+    # Verify files exist after download
+    if [ ! -f "models/chatterbox/s3gen.safetensors" ]; then
+        echo -e "${RED}✗${NC} Model files not found after extraction."
+        echo "   Expected: models/chatterbox/s3gen.safetensors"
+        ls -la models/ 2>/dev/null || echo "   (models/ directory not found)"
+        exit 1
+    fi
 fi
 
 # Build
