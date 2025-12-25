@@ -112,15 +112,12 @@ public actor ChatterboxEngine {
     ///   - modelsURL: Optional URL to models directory
     ///   - useQuantization: Whether to use INT8 quantization for faster inference (default: false)
     public func loadModels(from bundle: Bundle = .main, modelsURL: URL? = nil, useQuantization: Bool = false) async throws {
-        print("Loading Chatterbox models...")
         if useQuantization {
-            print("⚡️ INT8 quantization enabled (1.5-2x speedup expected)")
         }
 
         // Set GPU cache limit (256MB is optimal for MLX)
         let cacheLimitMB = 256
         GPU.set(cacheLimit: cacheLimitMB * 1024 * 1024)
-        print("GPU cache limit set to \(cacheLimitMB)MB")
 
         // Find model directory
         let modelDir: URL
@@ -129,15 +126,12 @@ public actor ChatterboxEngine {
         } else if let url = bundle.url(forResource: "models", withExtension: nil)?.appendingPathComponent("chatterbox") {
             modelDir = url
         } else {
-            print("ERROR: Could not find models/chatterbox in bundle")
             throw ChatterboxError.modelNotFound("models/chatterbox directory not found in bundle")
         }
-        print("Using model directory: \(modelDir.path)")
 
         // Determine which tokenizer is available to infer model type
         let mtlTokenizerPath = modelDir.appendingPathComponent("grapheme_mtl_merged_expanded_v1.json").path
         let isMultilingual = FileManager.default.fileExists(atPath: mtlTokenizerPath)
-        print("Model type: \(isMultilingual ? "Multilingual (2454 vocab)" : "English-only (704 vocab)")")
 
         // Load config if available, otherwise use Python-compatible defaults
         let configURL = modelDir.appendingPathComponent("config.json")
@@ -145,11 +139,9 @@ public actor ChatterboxEngine {
         if FileManager.default.fileExists(atPath: configURL.path) {
             let configData = try Data(contentsOf: configURL)
             config = try JSONDecoder().decode(T3Config.self, from: configData)
-            print("Config loaded from config.json: \(config.modelType)")
         } else {
             // Use Python-compatible defaults (matching T3Config class in Python)
             config = isMultilingual ? T3Config.multilingual() : T3Config.default
-            print("Using default config: \(config.modelType) (text_vocab=\(config.textVocabSize))")
         }
 
         // T3 weight files in priority order (matching Python's naming conventions)
@@ -175,13 +167,10 @@ public actor ChatterboxEngine {
         let ropeInMlxDir = modelDir.deletingLastPathComponent().appendingPathComponent("mlx/rope_freqs_llama3.safetensors")
         if FileManager.default.fileExists(atPath: ropeInModelDir.path) {
             ropeFreqsURL = ropeInModelDir
-            print("RoPE frequencies: \(ropeInModelDir.lastPathComponent)")
         } else if FileManager.default.fileExists(atPath: ropeInMlxDir.path) {
             ropeFreqsURL = ropeInMlxDir
-            print("RoPE frequencies: mlx/\(ropeInMlxDir.lastPathComponent)")
         } else {
             ropeFreqsURL = nil
-            print("Warning: rope_freqs_llama3.safetensors not found (will use default RoPE)")
         }
 
         // Find T3 and S3Gen weight files
@@ -203,20 +192,16 @@ public actor ChatterboxEngine {
 
         let s3genWeightsURL: URL?
         if FileManager.default.fileExists(atPath: s3genPyTorchURL.path) {
-            print("Found raw PyTorch S3Gen weights: s3gen.safetensors")
             s3genWeightsURL = s3genPyTorchURL
         } else if FileManager.default.fileExists(atPath: s3genFP16URL.path) {
-            print("Found FP16 S3Gen weights: s3gen_fp16.safetensors")
             s3genWeightsURL = s3genFP16URL
         } else if FileManager.default.fileExists(atPath: s3EngineURL.path) {
-            print("Using s3_engine.safetensors for S3Gen weights")
             s3genWeightsURL = s3EngineURL
         } else {
             s3genWeightsURL = nil
         }
 
         // 🚀 PARALLEL LOADING: Load T3 and S3Gen weights simultaneously
-        print("⚡️ Loading models in parallel...")
         let loadStart = Date()
 
         var rawWeights: [String: MLXArray]? = nil
@@ -226,9 +211,7 @@ public actor ChatterboxEngine {
             // Task 1: Load T3 weights (2GB)
             if let t3URL = t3WeightsURL {
                 group.addTask {
-                    print("  📥 T3: Loading from \(t3URL.lastPathComponent)...")
                     let weights = try MLX.loadArrays(url: t3URL)
-                    print("  ✅ T3: Loaded \(weights.count) arrays")
                     return ("t3", weights)
                 }
             }
@@ -236,9 +219,7 @@ public actor ChatterboxEngine {
             // Task 2: Load S3Gen weights (1GB)
             if let s3genURL = s3genWeightsURL {
                 group.addTask {
-                    print("  📥 S3Gen: Loading from \(s3genURL.lastPathComponent)...")
                     let weights = try MLX.loadArrays(url: s3genURL)
-                    print("  ✅ S3Gen: Loaded \(weights.count) arrays")
                     return ("s3gen", weights)
                 }
             }
@@ -254,15 +235,12 @@ public actor ChatterboxEngine {
         }
 
         let loadTime = Date().timeIntervalSince(loadStart)
-        print("⚡️ Parallel loading completed in \(String(format: "%.2f", loadTime))s")
 
         // Create T3 model
         if let rawT3Weights = rawWeights {
             let t3Weights = remapT3Keys(rawT3Weights)
-            print("Creating T3Model with \(t3Weights.count) weights...")
             self.t3 = T3Model(config: config, weights: t3Weights, ropeFreqsURL: ropeFreqsURL)
         } else {
-            print("Warning: No T3 weights found (checked: \(t3WeightFiles.joined(separator: ", ")))")
             self.t3 = T3Model(config: config)
         }
 
@@ -271,16 +249,13 @@ public actor ChatterboxEngine {
             // Note: Removed immediate eval() for speed - lazy evaluation is faster
             let min = t3.textEmb.weight.min().item(Float.self)
             let max = t3.textEmb.weight.max().item(Float.self)
-            print("✅ textEmb.weight: min=\(min), max=\(max)")
 
             if min == 0.0 && max == 0.0 {
-                print("⚠️ WARNING: Embeddings are zeros - weight loading may have failed!")
             }
         }
 
         // Create S3Gen model
         if let s3Weights = s3genWeights {
-            print("Creating S3Gen with \(s3Weights.count) weight arrays...")
 
             // Merge with any additional weights from rawWeights (for quantized encoder etc.)
             // FP16 weights take priority over quantized
@@ -288,13 +263,11 @@ public actor ChatterboxEngine {
             for (key, value) in s3Weights {
                 flowWeights[key] = value  // FP16 overwrites quantized
             }
-            print("Merged flow weights: \(flowWeights.count) total arrays")
 
             // s3gen.safetensors and s3gen_fp16.safetensors both include vocoder weights (mel2wav.*)
             // Extract vocoder weights from flowWeights (they have "mel2wav." or "s3gen.mel2wav." prefix)
             let vocoderWeights = flowWeights  // S3Gen.init will filter for mel2wav keys
             if let url = s3genWeightsURL {
-                print("Vocoder weights included in \(url.lastPathComponent) (mel2wav.* keys)")
             }
 
             // Create S3Gen
@@ -317,14 +290,10 @@ public actor ChatterboxEngine {
                         let noiseArrays = try MLX.loadArrays(url: pythonNoiseURL)
                         if let noise = noiseArrays["noise"] {
                             s3gen?.setFixedNoise(noise)
-                            print("✅ Loaded Python fixed noise for decoder precision")
                         }
                     } catch {
-                        print("⚠️  Could not load Python noise: \(error). Using MLX-generated noise instead.")
                     }
                 } else {
-                    print("⚠️  Python noise file not found at: \(pythonNoiseURL.path)")
-                    print("   Using MLX-generated noise (decoder correlation will be ~0.98)")
                 }
             }
 
@@ -347,22 +316,16 @@ public actor ChatterboxEngine {
                 // Also includes 56 attention out_proj.bias weights that were MISSING from Swift entirely
                 let pythonFlowURL = modelDir.appendingPathComponent("python_flow_weights.safetensors")
                 if FileManager.default.fileExists(atPath: pythonFlowURL.path) {
-                    print("Loading Python flow decoder weights for perfect fidelity...")
                     let pythonFlow = try MLX.loadArrays(url: pythonFlowURL)
-                    print("  Loaded \(pythonFlow.count) weights from Python")
                     // Keys are already in format: flow.decoder.estimator.down_blocks_0...
                     // Remap to Swift naming: decoder.downBlocks.0...
                     let remappedFlow = remapS3Keys(pythonFlow)
-                    print("  Remapped to \(remappedFlow.count) Swift keys")
                     let flowParams = ModuleParameters.unflattened(remappedFlow)
                     s3.update(parameters: flowParams)
 
                     // Count biases
                     let biasCount = pythonFlow.keys.filter { $0.contains("out_proj.bias") }.count
-                    print("✅ Applied Python flow decoder weights (includes \(biasCount) attention biases)")
                 } else {
-                    print("⚠️  WARNING: python_flow_weights.safetensors not found!")
-                    print("   Decoder will use original weights which differ from Python")
                 }
 
                 // NOTE: DO NOT load corrected_embed_norm_weights.safetensors
@@ -371,12 +334,10 @@ public actor ChatterboxEngine {
                 // See verify_v2_step6 for verification.
             }
         } else {
-            print("Error: No weights available for S3Gen")
             fatalError("S3Gen requires flowWeights and vocoderWeights to initialize properly")
         }
         
         s3gen?.train(false)
-        print("S3Gen initialized and set to eval mode")
 
         // Load tokenizer vocab and BPE merges
         // Prefer multilingual tokenizer (has [en], [fr], etc. as single tokens)
@@ -387,12 +348,9 @@ public actor ChatterboxEngine {
         let tokenizerURL: URL
         if FileManager.default.fileExists(atPath: mtlTokenizerURL.path) {
             tokenizerURL = mtlTokenizerURL
-            print("Loading multilingual tokenizer...")
         } else if FileManager.default.fileExists(atPath: enTokenizerURL.path) {
             tokenizerURL = enTokenizerURL
-            print("Loading English-only tokenizer...")
         } else {
-            print("Warning: No tokenizer found")
             tokenizerURL = enTokenizerURL  // Will fail below but with clear error
         }
 
@@ -400,14 +358,11 @@ public actor ChatterboxEngine {
             let (vocabDict, merges) = try loadVocab(from: tokenizerURL)
             self.vocab = vocabDict
             self.bpeMerges = merges
-            print("Tokenizer loaded: \(vocab?.count ?? 0) tokens, \(merges.count) BPE merges")
         } else {
-            print("Warning: Tokenizer file not found: \(tokenizerURL.lastPathComponent)")
         }
 
         // Apply INT8 quantization if requested (skip if we loaded pre-quantized weights)
         if useQuantization && !loadedPreQuantizedT3 {
-            print("\n⚡️ Applying runtime INT8 quantization...")
             let quantStart = Date()
 
             let groupSize = 64
@@ -415,8 +370,6 @@ public actor ChatterboxEngine {
             // Quantize T3Model only (95% of generation time)
             // Skip S3Gen to preserve voice expressiveness
             if let t3 = self.t3 {
-                print("  Quantizing T3Model (transformer attention & MLP layers)...")
-                print("  Note: Preserving embeddings and small layers for quality & multilingual support")
 
                 var quantizedCount = 0
                 MLXNN.quantize(model: t3, groupSize: groupSize, bits: 8) { path, module in
@@ -446,27 +399,19 @@ public actor ChatterboxEngine {
                     }
                     return false
                 }
-                print("  ✅ T3Model quantized (\(quantizedCount) layers converted to INT8)")
             }
 
             // Skip S3Gen quantization - preserves voice expressiveness
-            print("  ℹ️  S3Gen kept at FP16 (preserves voice expressiveness)")
 
             let quantTime = Date().timeIntervalSince(quantStart)
-            print("⚡️ Runtime quantization complete in \(String(format: "%.2f", quantTime))s")
-            print("   Expected speedup: 1.4-1.8x (T3 attention & MLP)")
         } else if useQuantization && loadedPreQuantizedT3 {
-            print("\n⚡️ Using pre-quantized INT8 weights (no runtime quantization needed)")
-            print("   Expected speedup: 1.4-1.8x (T3 attention & MLP)")
         }
 
         isLoaded = true
-        print("Models loaded successfully!")
     }
 
     private func loadWeights(from url: URL) async throws {
         // ... (Legacy method, mostly unused if loadModels does everything, but let's keep it safe)
-        print("Loading safetensors from: \(url.lastPathComponent)")
         let rawT3Weights = try MLX.loadArrays(url: url)
         let t3Weights = remapT3Keys(rawT3Weights)
         if let t3 = t3 {
@@ -907,7 +852,6 @@ public actor ChatterboxEngine {
     // MARK: - Voice Loading (Dual Soul Injection)
 
     public func loadVoice(_ name: String, from bundle: Bundle = .main, voicesURL: URL? = nil) throws {
-        print("Loading voice: \(name)")
 
         let voiceDir: URL
         if let url = voicesURL {
@@ -935,20 +879,17 @@ public actor ChatterboxEngine {
             throw ChatterboxError.voiceNotFound("t3.speaker_emb not found in voice file")
         }
         self.t3Soul = speakerEmb
-        print("T3 Soul (speaker embedding) loaded: shape \(t3Soul!.shape)")
 
         guard let condTokens = voiceWeights["t3.cond_prompt_speech_tokens"] else {
             throw ChatterboxError.voiceNotFound("t3.cond_prompt_speech_tokens not found in voice file")
         }
         self.t3CondTokens = condTokens
-        print("T3 cond tokens loaded: shape \(t3CondTokens!.shape)")
 
         // S3Gen conditioning
         guard let s3Emb = voiceWeights["gen.embedding"] else {
             throw ChatterboxError.voiceNotFound("gen.embedding not found in voice file")
         }
         self.s3Soul = s3Emb
-        print("S3 Soul loaded: shape \(s3Soul!.shape)")
 
         guard let pToken = voiceWeights["gen.prompt_token"] else {
             throw ChatterboxError.voiceNotFound("gen.prompt_token not found in voice file")
@@ -961,7 +902,6 @@ public actor ChatterboxEngine {
         self.promptFeat = pFeat
 
         isVoiceLoaded = true
-        print("Voice loaded from baked_voice.safetensors: \(name)")
     }
 
     // MARK: - Speech Generation
@@ -976,20 +916,16 @@ public actor ChatterboxEngine {
 
         // Apply punctuation normalization (matches Python's punc_norm)
         let normalizedText = puncNorm(text)
-        print("Generating speech for: \"\(normalizedText)\"")
 
         let tokens = tokenize(normalizedText)
         let textTokens = MLXArray(tokens.map { Int32($0) }).expandedDimensions(axis: 0)
 
-        print("Text tokens: \(tokens.count)")
-        print("Starting T3 generation...")
         let startTime = CFAbsoluteTimeGetCurrent()
 
         var currentCondTokens = t3CondTokens
         if !lastSpeechTokens.isEmpty {
             let suffix = lastSpeechTokens.suffix(150)
             currentCondTokens = MLXArray(suffix.map { Int32($0) }).expandedDimensions(axis: 0)
-            print("Using token chaining prompt (\(suffix.count) tokens)")
         }
 
         // Use Python's exact defaults from mtl_tts.py generate() method
@@ -1006,16 +942,12 @@ public actor ChatterboxEngine {
         )
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-        print("Generated \(speechTokens.count) speech tokens in \(String(format: "%.2f", elapsed))s")
 
         // Drop invalid tokens (SOS/EOS) - matches Python's drop_invalid_tokens
         let validTokens = T3Model.dropInvalidTokens(speechTokens)
-        print("After dropping SOS/EOS: \(validTokens.count) tokens")
 
-        print("Clearing GPU memory before S3Gen...")
         GPU.clearCache()
 
-        print("Starting S3Gen synthesis...")
         let speechTokenArray = MLXArray(validTokens.map { Int32($0) }).expandedDimensions(axis: 0)
         let audio = s3gen.generate(
             tokens: speechTokenArray,
@@ -1025,7 +957,6 @@ public actor ChatterboxEngine {
             promptFeat: promptFeat
         )
 
-        print("Playing audio: \(audio.shape) samples")
         eval(audio)
         playAudio(audio)
 
@@ -1062,7 +993,6 @@ public actor ChatterboxEngine {
                 }
             }
         }
-        print("Loaded BPE vocab with \(vocabDict.count) tokens and \(merges.count) merge rules")
         return (vocabDict, merges)
     }
 
@@ -1220,7 +1150,7 @@ public actor ChatterboxEngine {
         if let channelData = buffer.floatChannelData {
             for i in 0..<samples.count { channelData[0][i] = samples[i] }
         }
-        audioPlayer.scheduleBuffer(buffer) { print("Audio chunk finished playing") }
+        audioPlayer.scheduleBuffer(buffer)
     }
 
     public func stop() {
@@ -1230,7 +1160,6 @@ public actor ChatterboxEngine {
 
     public func resetState() {
         lastSpeechTokens.removeAll()
-        print("Voice state reset")
     }
 
     // MARK: - Audio Generation (returns data instead of playing)
@@ -1275,7 +1204,6 @@ public actor ChatterboxEngine {
             minP: 0.05                 // Python: min_p=0.05
         )
         let t3Time = Date().timeIntervalSince(t3Start)
-        print("⏱️  T3 token generation: \(String(format: "%.2f", t3Time))s (\(speechTokens.count) tokens)")
 
         // Drop invalid tokens (SOS/EOS)
         let validTokens = T3Model.dropInvalidTokens(speechTokens)
@@ -1293,7 +1221,6 @@ public actor ChatterboxEngine {
             promptFeat: promptFeat
         )
         let s3Time = Date().timeIntervalSince(s3Start)
-        print("⏱️  S3Gen audio synthesis: \(String(format: "%.2f", s3Time))s")
 
         eval(audio)
 
@@ -1321,9 +1248,6 @@ public actor ChatterboxEngine {
         let normalizedText = puncNorm(text)
         let textTokens = try tokenizeText(normalizedText)
 
-        print("Running T3 only...")
-        print("  Text: \"\(normalizedText)\"")
-        print("  Text tokens shape: \(textTokens.shape)")
 
         // Generate speech tokens
         let speechTokens = t3.generate(
@@ -1340,9 +1264,6 @@ public actor ChatterboxEngine {
 
         // Drop invalid tokens (SOS/EOS)
         let validTokens = T3Model.dropInvalidTokens(speechTokens)
-        print("  Generated \(validTokens.count) speech tokens")
-        print("  First 20: \(Array(validTokens.prefix(20)))")
-        print("  Last 20: \(Array(validTokens.suffix(20)))")
 
         return validTokens
     }
@@ -1375,7 +1296,6 @@ public actor ChatterboxEngine {
         eval(audio)
         let result = audio.asArray(Float.self)
 
-        print("  Generated \(result.count) samples (\(String(format: "%.2f", Float(result.count) / 24000.0))s)")
 
         return result
     }
@@ -1395,23 +1315,12 @@ public actor ChatterboxEngine {
             throw ChatterboxError.modelNotLoaded
         }
 
-        print("Running S3Gen with pre-generated tokens...")
-        print("  Speech tokens: \(speechTokens.shape)")
-        print("  Prompt tokens: \(promptTokens.shape)")
-        print("  Prompt feat: \(promptFeat.shape)")
-        print("  S3 Soul: \(s3Soul.shape)\n")
 
         // Extract tokens to check validity
         eval(speechTokens)
         let tokensFlat = speechTokens.reshaped([-1]).asArray(Int32.self)
         let validTokens = tokensFlat.filter { $0 < 6561 }
 
-        print("Token validation:")
-        print("  Total tokens: \(tokensFlat.count)")
-        print("  Valid tokens (<6561): \(validTokens.count)")
-        print("  Invalid tokens: \(tokensFlat.count - validTokens.count)")
-        print("  First 10: \(validTokens.prefix(10))")
-        print("  Last 10: \(validTokens.suffix(10))\n")
 
         // Use valid tokens
         let validTokenArray = MLXArray(validTokens).expandedDimensions(axis: 0)
@@ -1430,7 +1339,6 @@ public actor ChatterboxEngine {
         eval(audio)
 
         let result = audio.asArray(Float.self)
-        print("Generated \(result.count) audio samples (\(String(format: "%.2f", Float(result.count) / 24000.0))s)\n")
 
         return result
     }
@@ -1451,7 +1359,6 @@ public actor ChatterboxEngine {
 
         let file = try AVAudioFile(forWriting: url, settings: format.settings)
         try file.write(from: buffer)
-        print("Saved WAV to: \(url.path)")
     }
 }
 

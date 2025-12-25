@@ -35,7 +35,6 @@ public class RMSNorm: Module, UnaryLayer {
             static var firstCall = true
         }
         if DebugState.firstCall {
-            print("[RMSNorm DEBUG] input dtype: \(inputDtype), variance dtype: \(variance.dtype), weight dtype: \(weight.dtype), eps: \(eps)")
             DebugState.firstCall = false
         }
         #endif
@@ -91,11 +90,6 @@ public class RoPE: Module {
 
         super.init()
 
-        print("[RoPE] Loaded pre-computed Llama3 frequencies:")
-        print("  cos_table: \(cosTable.shape)")
-        print("  sin_table: \(sinTable.shape)")
-        print("  theta (base): \(self.base)")
-        print("  dims: \(self.dims)")
     }
 
     /// Apply rotary position embedding to input tensor
@@ -260,12 +254,6 @@ public class Attention: Module {
             let k_0_pre = keys[0, 0, 0, 0..<5]  // First token
             let v_pre = values[0, 0, L-1, 0..<5]
             eval(q_pre, k_pre, k_0_pre, v_pre)
-            print("\n🔬 PRE-ROPE (Batch 0, Head 0, Last Token [79]):")
-            print("   Q [:5]: \(q_pre.asArray(Float.self))")
-            print("   K [:5]: \(k_pre.asArray(Float.self))")
-            print("   V [:5]: \(v_pre.asArray(Float.self))")
-            print("\n🔬 PRE-ROPE (Batch 0, Head 0, First Token [0]):")
-            print("   K [:5]: \(k_0_pre.asArray(Float.self))")
         }
 
         queries = rope(queries, offset: offset)
@@ -291,11 +279,6 @@ public class Attention: Module {
         // 🔬 PRECISION DIAGNOSTIC: Check dtypes
         if offset == 0 && L == 80 {
             eval(queries, keys, scores)
-            print("\n🔬 PRECISION CHECK:")
-            print("   Q dtype: \(queries.dtype)")
-            print("   K dtype: \(keys.dtype)")
-            print("   scores dtype: \(scores.dtype)")
-            print("   scale value: \(scale)")
         }
 
         // 🔬 MANUAL DOT PRODUCT VERIFICATION
@@ -317,14 +300,6 @@ public class Attention: Module {
 
             let mlx_score = scores[0, 0, L-1, 0].item(Float.self)
 
-            print("\n🔬 MANUAL DOT PRODUCT VERIFICATION (Token 79, Pos 0):")
-            print("   q[79][:5]: \(Array(q_arr.prefix(5)))")
-            print("   k[0][:5]:  \(Array(k_arr.prefix(5)))")
-            print("   Manual dot (unscaled): \(manual_dot)")
-            print("   Manual score (scaled):  \(manual_score)")
-            print("   MLX matmul result:      \(mlx_score)")
-            print("   Difference: \(abs(manual_score - mlx_score))")
-            print("   Python reference: 1.4127315283")
         }
 
         // 🔬 MASK DIAGNOSTIC: Check mask and scores
@@ -332,20 +307,13 @@ public class Attention: Module {
             eval(scores)
             let scores_pre = scores[0, 0, L-1, 0..<5]  // Batch 0, Head 0, Last token, First 5
             eval(scores_pre)
-            print("\n🔬 SCORES (PRE-MASK) [B0, H0, T79, :5]:")
-            print("   \(scores_pre.asArray(Float.self))")
 
             if let m = mask {
                 eval(m)
-                print("\n🔬 MASK:")
-                print("   Shape: \(m.shape)")
                 let mask_first = m[0, 0, 0, 0..<5]
                 let mask_last = m[0, 0, L-1, 0..<5]
                 eval(mask_first, mask_last)
-                print("   First row [0,0,0,:5]: \(mask_first.asArray(Float.self))")
-                print("   Last row [0,0,79,:5]: \(mask_last.asArray(Float.self))")
             } else {
-                print("\n🔬 MASK: nil (no mask applied)")
             }
         }
 
@@ -358,8 +326,6 @@ public class Attention: Module {
             eval(scores)
             let scores_post = scores[0, 0, L-1, 0..<5]
             eval(scores_post)
-            print("\n🔬 SCORES (POST-MASK) [B0, H0, T79, :5]:")
-            print("   \(scores_post.asArray(Float.self))")
         }
 
         // Check scores for Step 1, Layer 0
@@ -373,9 +339,6 @@ public class Attention: Module {
             let weights_row = weights[0, 0, L-1]  // All 80 positions
             let weights_sum = weights_row.sum()  // Should be 1.0
             eval(weights_sample, weights_sum)
-            print("\n🔬 ATTENTION WEIGHTS (POST-SOFTMAX) [B0, H0, T79, :5]:")
-            print("   \(weights_sample.asArray(Float.self))")
-            print("   Sum over all positions: \(weights_sum.item(Float.self))")
         }
 
         if offset == 80 && L == 1 {
@@ -388,8 +351,6 @@ public class Attention: Module {
             eval(output)
             let agg_sample = output[0, 0, L-1, 0..<5]  // [B, nHeads, L, headDim]
             eval(agg_sample)
-            print("\n🔬 CHECKPOINT 5: After Weights @ Values [B0, H0, T79, :5]:")
-            print("   \(agg_sample.asArray(Float.self))")
         }
 
         // Reshape back
@@ -400,8 +361,6 @@ public class Attention: Module {
             eval(output)
             let reshaped_sample = output[0, L-1, 0..<5]  // [B, L, hiddenDim]
             eval(reshaped_sample)
-            print("\n🔬 CHECKPOINT 6: After Reshape [B0, T79, :5]:")
-            print("   \(reshaped_sample.asArray(Float.self))")
         }
 
         let finalOutput = oProj(output)
@@ -411,8 +370,6 @@ public class Attention: Module {
             eval(finalOutput)
             let final_sample = finalOutput[0, L-1, 0..<5]
             eval(final_sample)
-            print("\n🔬 CHECKPOINT 7: After oProj (Final) [B0, T79, :5]:")
-            print("   \(final_sample.asArray(Float.self))")
         }
 
         return finalOutput
@@ -488,18 +445,11 @@ public class InspectableAttention: Module {
             let k_0_pre = keys[0, 0, 0, 0..<5]  // First token
             let v_pre = values[0, 0, L-1, 0..<5]
             eval(q_pre, k_pre, k_0_pre, v_pre)
-            print("\n🔬 PRE-ROPE (Batch 0, Head 0, Last Token [79]):")
-            print("   Q [:5]: \(q_pre.asArray(Float.self))")
-            print("   K [:5]: \(k_pre.asArray(Float.self))")
-            print("   V [:5]: \(v_pre.asArray(Float.self))")
-            print("\n🔬 PRE-ROPE (Batch 0, Head 0, First Token [0]):")
-            print("   K [:5]: \(k_0_pre.asArray(Float.self))")
         }
 
         // DEBUG: Log offset every 10 steps and around the suspected freeze point (frame 70-90)
         let shouldLog = (offset % 10 == 0) || (offset >= 70 && offset <= 90)
         if shouldLog {
-            print("🔍 RoPE offset=\(offset), seqLen=\(L)")
         }
 
         queries = rope(queries, offset: offset)
@@ -512,11 +462,6 @@ public class InspectableAttention: Module {
             let k_post = keys[0, 0, L-1, 0..<5]
             let k_0_post = keys[0, 0, 0, 0..<5]  // CRITICAL: Check position 0 too!
             eval(q_post, k_post, k_0_post)
-            print("\n🔬 POST-ROPE (Batch 0, Head 0, Last Token [79]):")
-            print("   Q [:5]: \(q_post.asArray(Float.self))")
-            print("   K [:5]: \(k_post.asArray(Float.self))")
-            print("\n🔬 POST-ROPE (Batch 0, Head 0, First Token [0]):")
-            print("   K [:5]: \(k_0_post.asArray(Float.self))")
         }
 
         // Update cache
@@ -526,7 +471,6 @@ public class InspectableAttention: Module {
             let newOffset = cache.offset
 
             if shouldLog {
-                print("🔍 KV cache: oldOffset=\(oldOffset) → newOffset=\(newOffset) (delta=\(newOffset - oldOffset))")
             }
         }
 
@@ -660,8 +604,6 @@ public class TransformerBlock: Module, TransformerBlockProtocol {
             eval(normedInput)
             let norm_sample = normedInput[0, 0, 0..<5]  // Batch 0, Token 0 (position 0), First 5 dims
             eval(norm_sample)
-            print("\n🔬 CHECKPOINT 1: LayerNorm Output [B0, T0, :5]:")
-            print("   \(norm_sample.asArray(Float.self))")
         }
 
         let attnOut = selfAttn(normedInput, mask: mask, cache: cache)
@@ -675,8 +617,6 @@ public class TransformerBlock: Module, TransformerBlockProtocol {
             eval(mlpInput)
             let mlp_in_sample = mlpInput[0, 79, 0..<5]  // Batch 0, Token 79, First 5
             eval(mlp_in_sample)
-            print("\n🔬 CHECKPOINT 8: MLP Input (Post-Norm) [B0, T79, :5]:")
-            print("   \(mlp_in_sample.asArray(Float.self))")
         }
 
         let mlpOutput = mlp(mlpInput)
@@ -686,8 +626,6 @@ public class TransformerBlock: Module, TransformerBlockProtocol {
             eval(mlpOutput)
             let mlp_out_sample = mlpOutput[0, 79, 0..<5]
             eval(mlp_out_sample)
-            print("\n🔬 CHECKPOINT 9: MLP Output (Before Residual) [B0, T79, :5]:")
-            print("   \(mlp_out_sample.asArray(Float.self))")
         }
 
         let finalOutput = h + mlpOutput  // Second residual connection
@@ -697,8 +635,6 @@ public class TransformerBlock: Module, TransformerBlockProtocol {
             eval(finalOutput)
             let final_sample = finalOutput[0, 79, 0..<5]
             eval(final_sample)
-            print("\n🔬 CHECKPOINT 10: Layer 0 Final Output [B0, T79, :5]:")
-            print("   \(final_sample.asArray(Float.self))")
         }
 
         return finalOutput
@@ -806,7 +742,6 @@ public class KVCache {
                 keys = concatenated([sinkKeys, recentKeys], axis: 2)
                 values = concatenated([sinkValues, recentValues], axis: 2)
 
-                print("KVCache: Evicted \(currentSize - maxCacheSize) tokens, keeping \(sinkTokens) sink + \(maxCacheSize - sinkTokens) recent")
             }
         } else {
             keys = newKeys
@@ -881,22 +816,16 @@ public class T3Model: Module {
 
         // Analyze weights
         let stats = LinearFactory.analyzeWeights(weights)
-        print("T3Model: Loading weights - \(stats.quantized) quantized, \(stats.fp16) FP16, \(stats.other) other")
 
         // Create shared RoPE instance with pre-computed Llama3 frequencies
         let sharedRoPE: RoPE?
         if let ropeURL = ropeFreqsURL {
             do {
                 sharedRoPE = try RoPE(loadFrequenciesFrom: ropeURL)
-                print("T3Model: Using pre-computed Llama3 RoPE frequencies from \(ropeURL.lastPathComponent)")
             } catch {
-                print("⚠️  Failed to load RoPE frequencies: \(error)")
-                print("   Falling back to on-the-fly computation (may not match Python)")
                 sharedRoPE = nil
             }
         } else {
-            print("⚠️  No RoPE frequency table provided - using on-the-fly computation")
-            print("   This may not match Python's Llama3 RoPE scaling!")
             sharedRoPE = nil
         }
 
@@ -904,7 +833,6 @@ public class T3Model: Module {
         // Use InspectableTransformerBlock for layers 9, 12, 13 (alignment tracking)
         self.layers = (0..<config.numHiddenLayers).map { i in
             if Self.inspectableLayerIndices.contains(i) {
-                print("T3Model: Using InspectableTransformerBlock for layer \(i)")
                 return InspectableTransformerBlock(config: config, layerIndex: i, weights: weights, rope: sharedRoPE) as Module
             } else {
                 return TransformerBlock(config: config, layerIndex: i, weights: weights, rope: sharedRoPE) as Module
@@ -913,35 +841,23 @@ public class T3Model: Module {
         self.norm = RMSNorm(dims: config.hiddenSize, eps: config.rmsNormEps)
 
         // Load final norm weight
-        print("   Available keys containing 'norm': \(weights.keys.filter { $0.contains("norm") })")
         fflush(stdout)
-        print("   About to access weights[\"norm.weight\"]..."); fflush(stdout)
         if let normWeight = weights["norm.weight"] {
-            print("   Successfully got normWeight"); fflush(stdout)
-            print("   ✅ Found 'norm.weight' key, shape: \(normWeight.shape), dtype: \(normWeight.dtype)")
             eval(normWeight)
-            print("   normWeight range: [\(normWeight.min().item(Float.self)), \(normWeight.max().item(Float.self))]")
-            print("   Current norm.weight shape: \(self.norm.weight.shape)")
 
             // Assign the weight
             self.norm.weight = normWeight
-            print("   ✅ Weight assigned successfully")
 
             eval(self.norm.weight)
-            print("   ✅ Eval completed")
 
             // Try to access the data safely
             do {
                 let firstFive = try self.norm.weight[0..<min(5, self.norm.weight.shape[0])].asArray(Float.self)
-                print("   After assignment - norm.weight[:5]: \(firstFive)")
                 let meanVal = self.norm.weight.mean().item(Float.self)
                 let sumVal = self.norm.weight.sum().item(Float.self)
-                print("   After assignment - mean: \(meanVal), sum: \(sumVal)")
             } catch {
-                print("   ⚠️  Error accessing norm weight values: \(error)")
             }
         } else {
-            print("   ❌ 'norm.weight' key NOT FOUND in weights dictionary!")
         }
 
         // Embeddings - these are FP16 (not quantized)
@@ -953,19 +869,15 @@ public class T3Model: Module {
         // Load embedding weights using update(parameters:) - MLX Embedding.weight is immutable
         if let w = weights["textEmb.weight"] {
             self.textEmb.update(parameters: ModuleParameters.unflattened(["weight": w]))
-            print("  Loaded textEmb.weight")
         }
         if let w = weights["speechEmb.weight"] {
             self.speechEmb.update(parameters: ModuleParameters.unflattened(["weight": w]))
-            print("  Loaded speechEmb.weight")
         }
         if let w = weights["textPosEmb.embedding.weight"] {
             self.textPosEmb.embedding.update(parameters: ModuleParameters.unflattened(["weight": w]))
-            print("  Loaded textPosEmb.embedding.weight")
         }
         if let w = weights["speechPosEmb.embedding.weight"] {
             self.speechPosEmb.embedding.update(parameters: ModuleParameters.unflattened(["weight": w]))
-            print("  Loaded speechPosEmb.embedding.weight")
         }
 
         // Output head - Use FP32 weights from t3_fp32.safetensors for perfect precision
@@ -983,7 +895,6 @@ public class T3Model: Module {
                 weights: weights,
                 prefix: "perceiver"
             )
-            print("  Loaded Perceiver module")
         } else {
             self.perceiver = nil
         }
@@ -1000,11 +911,9 @@ public class T3Model: Module {
         // Load emotionAdvFC weights after super.init()
         if let emotionWeight = weights["emotionAdvFC.weight"] {
             self.emotionAdvFC!.update(parameters: ModuleParameters.unflattened(["weight": emotionWeight]))
-            print("  Loaded emotionAdvFC.weight")
         }
 
         self.train(false) // Set eval mode
-        print("T3Model: Initialization complete")
     }
 
     /// Legacy init without weights (random initialization)
@@ -1047,7 +956,6 @@ public class T3Model: Module {
         let isInitialPass = (cache == nil) || cacheOffset == 0
 
         if cacheOffset <= 0 {
-            print("DEBUG forward(): cacheOffset=\(cacheOffset), isInitialPass=\(isInitialPass)")
         }
 
         for (i, layer) in layers.enumerated() {
@@ -1066,36 +974,16 @@ public class T3Model: Module {
                 // 🔍 NEW: Debug incremental pass (Step 1)
                 if currentOffset == 80 {
                     eval(h)
-                    print("\n" + String(repeating: "=", count: 60))
-                    print("🔍 SWIFT LAYER 0 INCREMENTAL (STEP 1) DEBUG:")
-                    print(String(repeating: "=", count: 60))
-                    print("  Layer 0 incremental output shape: \(h.shape)")
-                    print("  Cache offset: \(currentOffset) (should be 80)")
 
                     let b0First5 = h[0, 0, 0..<5]
                     let b1First5 = h[1, 0, 0..<5]
                     eval(b0First5, b1First5)
 
-                    print("  Batch 0, first 5:")
-                    print("    \(b0First5.asArray(Float.self))")
-                    print("  Batch 1, first 5:")
-                    print("    \(b1First5.asArray(Float.self))")
-                    print(String(repeating: "=", count: 60))
-                    print("Python Reference (from test_layer0_full.py):")
-                    print("  Batch 0: [-0.04825843, 0.09446631, -0.10146948, 0.04380099, -0.04365392]")
-                    print("  Batch 1: [-0.04825843, 0.09446631, -0.10146948, 0.04380099, -0.04365392]")
-                    print("✅ If Swift matches → Layer 0 is PERFECT (Attention + MLP + Residuals)!")
-                    print("❌ If Swift diverges → Bug still exists (check MLP or residual connections)")
-                    print(String(repeating: "=", count: 60) + "\n")
                 }
             }
 
             if i == 0 && isInitialPass {
                 eval(h)  // Force computation
-                print("\n" + String(repeating: "=", count: 60))
-                print("🔍 SWIFT LAYER 0 DEBUG:")
-                print(String(repeating: "=", count: 60))
-                print("  Layer 0 output shape: \(h.shape)")
 
                 // Get last token (position 79 = BOS token for 2-batch, or last position)
                 let lastIdx = h.shape[1] - 1
@@ -1103,14 +991,10 @@ public class T3Model: Module {
                 let b0Last10 = h[0, lastIdx, 0..<10]
                 eval(b0Last10)
 
-                print("  Batch 0, last token, first 10:")
-                print("    \(b0Last10.asArray(Float.self))")
 
                 if batchSize >= 2 {
                     let b1Last10 = h[1, lastIdx, 0..<10]
                     eval(b1Last10)
-                    print("  Batch 1, last token, first 10:")
-                    print("    \(b1Last10.asArray(Float.self))")
                 }
 
                 // Stats
@@ -1125,18 +1009,11 @@ public class T3Model: Module {
                     mean.item(Float.self),
                     std.item(Float.self)
                 )
-                print("  Range: [\(String(format: "%.6f", stats.0)), \(String(format: "%.6f", stats.1))]")
-                print("  Mean: \(String(format: "%.6f", stats.2)), Std: \(String(format: "%.6f", stats.3))")
-                print(String(repeating: "=", count: 60) + "\n")
             }
 
             // DEBUG: Capture Layer 15 output (index 14) for binary search
             if i == 14 && isInitialPass {
                 eval(h)  // Force computation
-                print("\n" + String(repeating: "=", count: 60))
-                print("🔍 SWIFT LAYER 15 DEBUG (Binary Search):")
-                print(String(repeating: "=", count: 60))
-                print("  Layer 15 output shape: \(h.shape)")
 
                 // Get last token for batches
                 let lastIdx = h.shape[1] - 1
@@ -1144,14 +1021,10 @@ public class T3Model: Module {
                 let b0Last10 = h[0, lastIdx, 0..<10]
                 eval(b0Last10)
 
-                print("  Batch 0, last token, first 10:")
-                print("    \(b0Last10.asArray(Float.self))")
 
                 if batchSize >= 2 {
                     let b1Last10 = h[1, lastIdx, 0..<10]
                     eval(b1Last10)
-                    print("  Batch 1, last token, first 10:")
-                    print("    \(b1Last10.asArray(Float.self))")
                 }
 
                 // Stats
@@ -1166,29 +1039,21 @@ public class T3Model: Module {
                     mean.item(Float.self),
                     std.item(Float.self)
                 )
-                print("  Range: [\(String(format: "%.6f", stats.0)), \(String(format: "%.6f", stats.1))]")
-                print("  Mean: \(String(format: "%.6f", stats.2)), Std: \(String(format: "%.6f", stats.3))")
-                print(String(repeating: "=", count: 60) + "\n")
             }
         }
 
         // 🔬 CHECKPOINT: Final Block Output (before norm)
         if isInitialPass {
             eval(h)
-            print("\n" + String(repeating: "=", count: 60))
-            print(String(repeating: "=", count: 60))
-            print("  Shape: \(h.shape)")
 
             let lastIdx = h.shape[1] - 1
             let batchSize = h.shape[0]
             let b0_last_5 = h[0, lastIdx, 0..<5]
             eval(b0_last_5)
 
-            print("  [B0, T\(lastIdx), :5]: \(b0_last_5.asArray(Float.self))")
             if batchSize >= 2 {
                 let b1_last_5 = h[1, lastIdx, 0..<5]
                 eval(b1_last_5)
-                print("  [B1, T\(lastIdx), :5]: \(b1_last_5.asArray(Float.self))")
             }
 
             let mean = h.mean()
@@ -1202,31 +1067,22 @@ public class T3Model: Module {
                 mean.item(Float.self),
                 std.item(Float.self)
             )
-            print("  Range: [\(String(format: "%.6f", stats.0)), \(String(format: "%.6f", stats.1))]")
-            print("  Mean: \(String(format: "%.6f", stats.2)), Std: \(String(format: "%.6f", stats.3))")
-            print(String(repeating: "=", count: 60) + "\n")
         }
 
         // 🔬 FINAL NORM DIAGNOSTICS (Before applying norm)
         if isInitialPass {
-            print("\n" + String(repeating: "=", count: 60))
-            print(String(repeating: "=", count: 60))
 
             // 1. Check Weights
             eval(norm.weight)
             let normWeightFirst5 = norm.weight[0..<5]
             eval(normWeightFirst5)
-            print("  Final Norm Weight (First 5): \(normWeightFirst5.asArray(Float.self))")
 
             // 2. Check Weight Stats
             let wMean = norm.weight.mean()
             let wSum = norm.weight.sum()
             eval(wMean, wSum)
-            print("  Final Norm Weight Mean: \(wMean.item(Float.self))")
-            print("  Final Norm Weight Sum: \(wSum.item(Float.self))")
 
             // 3. Check Epsilon
-            print("  Final Norm Epsilon: \(norm.eps)")
 
             // 4. Manual RMS Calculation
             let x = h  // The input (Checkpoint 1)
@@ -1240,11 +1096,7 @@ public class T3Model: Module {
             let lastIdx = manualNorm.shape[1] - 1
             let manualNormSample = manualNorm[0, lastIdx, 0..<5]
             eval(manualNormSample)
-            print("\n  Manual RMS Calculation:")
-            print("    Input [B0, T79, :5]: \(h[0, lastIdx, 0..<5].asArray(Float.self))")
-            print("    Manual Norm [B0, T79, :5]: \(manualNormSample.asArray(Float.self))")
 
-            print(String(repeating: "=", count: 60) + "\n")
         }
 
         let normedOutput = norm(h)
@@ -1252,22 +1104,16 @@ public class T3Model: Module {
         // 🔬 CHECKPOINT: Final Norm Output
         if isInitialPass {
             eval(normedOutput)
-            print("\n" + String(repeating: "=", count: 60))
-            print(String(repeating: "=", count: 60))
-            print("  Shape: \(normedOutput.shape)")
 
             let lastIdx = normedOutput.shape[1] - 1
             let batchSize = normedOutput.shape[0]
             let b0_last_5 = normedOutput[0, lastIdx, 0..<5]
             eval(b0_last_5)
 
-            print("  Actual Norm Output [B0, T\(lastIdx), :5]: \(b0_last_5.asArray(Float.self))")
             if batchSize >= 2 {
                 let b1_last_5 = normedOutput[1, lastIdx, 0..<5]
                 eval(b1_last_5)
-                print("  [B1, T\(lastIdx), :5]: \(b1_last_5.asArray(Float.self))")
             }
-            print("\n  Python Reference [B0, T79, :5]: [-0.02582952, 0.70925778, 0.39189163, -1.67706203, -2.14925456]")
 
             let mean = normedOutput.mean()
             let variance = ((normedOutput - mean) * (normedOutput - mean)).mean()
@@ -1280,9 +1126,6 @@ public class T3Model: Module {
                 mean.item(Float.self),
                 std.item(Float.self)
             )
-            print("  Range: [\(String(format: "%.6f", stats.0)), \(String(format: "%.6f", stats.1))]")
-            print("  Mean: \(String(format: "%.6f", stats.2)), Std: \(String(format: "%.6f", stats.3))")
-            print(String(repeating: "=", count: 60) + "\n")
         }
 
         return normedOutput
@@ -1301,12 +1144,10 @@ public class T3Model: Module {
                     result[i] = weights
                     capturedCount += 1
                 } else {
-                    print("WARNING: Layer \(i) is inspectable but has nil lastAttentionWeights")
                 }
             }
         }
         if inspectableCount > 0 && capturedCount < inspectableCount {
-            print("DEBUG: Found \(inspectableCount) inspectable layers but only \(capturedCount) captured attention")
         }
         return result
     }
@@ -1378,9 +1219,6 @@ public class T3Model: Module {
         let cond_pos0 = condEmb[0, 0, 0..<5]
         let cond_pos1 = condEmb[0, 1, 0..<5]
         eval(cond_pos0, cond_pos1)
-        print("   Position 0 (speaker): \(cond_pos0.asArray(Float.self))")
-        print("   Position 1 (perceiver[0]): \(cond_pos1.asArray(Float.self))")
-        print("   Python Pos 0 reference: [-0.006982, -0.016019, -0.012832, 0.014774, -0.018492]")
 
         // Text positions start from 0 (text has its own position embedding space)
         let textLen = textTokens.shape[1]
@@ -1389,13 +1227,8 @@ public class T3Model: Module {
 
         // --- DEBUG: TEXT EMBEDDINGS ---
         eval(textEmbedding)
-        print("\n🔍 TEXT EMBEDDINGS (after textEmb + textPosEmb):")
-        print("   Shape: \(textEmbedding.shape)")
-        print("   Text tokens: \(textTokens.asArray(Int32.self))")
         let firstTextEmb = textEmbedding[0, 0, 0..<10]
         eval(firstTextEmb)
-        print("   Token 0 (284) embedding [:10]: \(firstTextEmb.asArray(Float.self))")
-        print()
         // --------------------------------
 
         // ============================================
@@ -1468,50 +1301,35 @@ public class T3Model: Module {
         let causalMask = T3Model.createCausalMask(seqLen: seqLen)
             .reshaped([1, 1, seqLen, seqLen])
         eval(causalMask)
-        print("✅ Created causal mask: \(causalMask.shape), seqLen=\(seqLen) (fully causal like Python's LlamaModel)\n")
 
         // ============================================
         // DEBUG: CHECK INPUT TO LAYER 0 FOR BOTH BATCHES
         // Focus on TEXT region (positions 34-43) as this is where conditional/unconditional differ
         // ============================================
-        print("\n🔍 === INPUT TO LAYER 0 (Before any processing) ===")
         eval(inputEmb)
-        print("Input shape: \(inputEmb.shape)")
-        print("Sequence structure: [cond(34) | text(10) | bos1 | bos2] = 46 tokens")
-        print("Text region: positions 34-43 (should be ZEROS for Batch 1 unconditional)\n")
 
         // Check TEXT region (positions 34-43)
         let textStartDebug = 34
         let textEndDebug = 43
-        print("Batch 0 (Conditional), TEXT positions \(textStartDebug)-\(textEndDebug), first 5 dims:")
         for pos in textStartDebug...textEndDebug {
             let textEmb = inputEmb[0, pos, 0..<5]
             eval(textEmb)
-            print("  Pos \(pos): \(textEmb.asArray(Float.self))")
         }
 
-        print("\nBatch 1 (Unconditional), TEXT positions \(textStartDebug)-\(textEndDebug), first 5 dims:")
-        print("(These should all be ZEROS for unconditional)")
         for pos in textStartDebug...textEndDebug {
             let textEmb = inputEmb[1, pos, 0..<5]
             eval(textEmb)
             let vals = textEmb.asArray(Float.self)
             let allZeros = vals.allSatisfy { abs($0) < 1e-6 }
-            print("  Pos \(pos): \(vals) \(allZeros ? "✓ ZEROS" : "✗ NOT ZEROS!")")
         }
 
         // Also check last token (BOS) - should be identical
         let lastInputIdxCheck = inputEmb.shape[1] - 1
-        print("\nLast Token (BOS at position \(lastInputIdxCheck)):")
         let b0BOS = inputEmb[0, lastInputIdxCheck, 0..<10]
         let b1BOS = inputEmb[1, lastInputIdxCheck, 0..<10]
         eval(b0BOS, b1BOS)
-        print("  Batch 0 [:10]: \(b0BOS.asArray(Float.self))")
-        print("  Batch 1 [:10]: \(b1BOS.asArray(Float.self))")
         let diffCheck = abs(b0BOS - b1BOS).max()
         eval(diffCheck)
-        print("  Max difference: \(diffCheck.item(Float.self)) (should be 0.0)")
-        print(String(repeating: "=", count: 60) + "\n")
 
         // ============================================
         // DEBUG INSTRUMENTATION - REMOVED TO AVOID CACHE CONTAMINATION
@@ -1523,7 +1341,6 @@ public class T3Model: Module {
         // ============================================
         // LAYER 1 DETAILED INSTRUMENTATION
         // ============================================
-        print(String(repeating: "=", count: 60))
 
         // Fresh caches for clean debug
         let freshCache = layers.map { _ in KVCache() }
@@ -1534,19 +1351,13 @@ public class T3Model: Module {
         let causalMaskDebug = T3Model.createCausalMask(seqLen: seqLenDebug)
             .reshaped([1, 1, seqLenDebug, seqLenDebug])  // Add batch and head dimensions
         eval(causalMaskDebug)
-        print("✅ Created causal mask: \(causalMaskDebug.shape), seqLen=\(seqLenDebug) (fully causal like Python)\n")
 
         // ======== LAYER 0 ========
-        print("LAYER 0:")
-        print(String(repeating: "=", count: 60))
 
         var layer0Input = inputEmb
-        print("  Input shape: \(layer0Input.shape)")
         let layer0InB0 = layer0Input[0, layer0Input.shape[1]-1, 0..<5]
         let layer0InB1 = layer0Input[1, layer0Input.shape[1]-1, 0..<5]
         eval(layer0InB0, layer0InB1)
-        print("  Input Batch 0, last token, first 5: \(layer0InB0.asArray(Float.self))")
-        print("  Input Batch 1, last token, first 5: \(layer0InB1.asArray(Float.self))")
 
         var layer0Output = inputEmb
         if let block0 = layers[0] as? TransformerBlock {
@@ -1559,104 +1370,60 @@ public class T3Model: Module {
         let layer0OutB0 = layer0Output[0, layer0Output.shape[1]-1, 0..<5]
         let layer0OutB1 = layer0Output[1, layer0Output.shape[1]-1, 0..<5]
         eval(layer0OutB0, layer0OutB1)
-        print("  Output Batch 0, last token, first 5: \(layer0OutB0.asArray(Float.self))")
-        print("  Output Batch 1, last token, first 5: \(layer0OutB1.asArray(Float.self))")
-        print()
 
         // ======== LAYER 1 DETAILED ========
-        print(String(repeating: "=", count: 60))
-        print("LAYER 1 DETAILED:")
-        print(String(repeating: "=", count: 60))
 
         if let layer1Block = layers[1] as? TransformerBlock {
             let layer1Input = layer0Output
             let lastToken = layer1Input.shape[1] - 1
 
-            print("1️⃣ Layer 1 Input:")
-            print("   Shape: \(layer1Input.shape)")
             let step1B0 = layer1Input[0, lastToken, 0..<5]
             let step1B1 = layer1Input[1, lastToken, 0..<5]
             eval(step1B0, step1B1)
-            print("   Batch 0, last token, first 5: \(step1B0.asArray(Float.self))")
-            print("   Batch 1, last token, first 5: \(step1B1.asArray(Float.self))")
-            print()
 
             // Step 1: Input layernorm
             let normedInput = layer1Block.inputLayernorm(layer1Input)
             eval(normedInput)
-            print("2️⃣ After Input LayerNorm:")
             let step2B0 = normedInput[0, lastToken, 0..<5]
             let step2B1 = normedInput[1, lastToken, 0..<5]
             eval(step2B0, step2B1)
-            print("   Batch 0, last token, first 5: \(step2B0.asArray(Float.self))")
-            print("   Batch 1, last token, first 5: \(step2B1.asArray(Float.self))")
-            print()
 
             // Step 2: Self-attention (with causal mask)
             let attnOutput = layer1Block.selfAttn(normedInput, mask: causalMask, cache: freshCache[1])
             eval(attnOutput)
-            print("3️⃣ After Self-Attention (before residual):")
             let step3B0 = attnOutput[0, lastToken, 0..<5]
             let step3B1 = attnOutput[1, lastToken, 0..<5]
             eval(step3B0, step3B1)
-            print("   Batch 0, last token, first 5: \(step3B0.asArray(Float.self))")
-            print("   Batch 1, last token, first 5: \(step3B1.asArray(Float.self))")
-            print()
 
             // Step 3: First residual
             let h = layer1Input + attnOutput
             eval(h)
-            print("4️⃣ After First Residual (h = x + attn):")
             let step4B0 = h[0, lastToken, 0..<5]
             let step4B1 = h[1, lastToken, 0..<5]
             eval(step4B0, step4B1)
-            print("   Batch 0, last token, first 5: \(step4B0.asArray(Float.self))")
-            print("   Batch 1, last token, first 5: \(step4B1.asArray(Float.self))")
-            print()
 
             // Step 4: Post-attention layernorm
             let normedH = layer1Block.postAttentionLayernorm(h)
             eval(normedH)
-            print("5️⃣ After Post-Attention LayerNorm:")
             let step5B0 = normedH[0, lastToken, 0..<5]
             let step5B1 = normedH[1, lastToken, 0..<5]
             eval(step5B0, step5B1)
-            print("   Batch 0, last token, first 5: \(step5B0.asArray(Float.self))")
-            print("   Batch 1, last token, first 5: \(step5B1.asArray(Float.self))")
-            print()
 
             // Step 5: MLP
             let mlpOutput = layer1Block.mlp(normedH)
             eval(mlpOutput)
-            print("6️⃣ After MLP (before residual):")
             let step6B0 = mlpOutput[0, lastToken, 0..<5]
             let step6B1 = mlpOutput[1, lastToken, 0..<5]
             eval(step6B0, step6B1)
-            print("   Batch 0, last token, first 5: \(step6B0.asArray(Float.self))")
-            print("   Batch 1, last token, first 5: \(step6B1.asArray(Float.self))")
-            print()
 
             // Step 6: Second residual
             let layer1Output = h + mlpOutput
             eval(layer1Output)
-            print("7️⃣ Final Layer 1 Output (h + mlp):")
             let step7B0 = layer1Output[0, lastToken, 0..<5]
             let step7B1 = layer1Output[1, lastToken, 0..<5]
             eval(step7B0, step7B1)
-            print("   Batch 0, last token, first 5: \(step7B0.asArray(Float.self))")
-            print("   Batch 1, last token, first 5: \(step7B1.asArray(Float.self))")
-            print()
 
-            print(String(repeating: "=", count: 60))
-            print("COMPARE WITH PYTHON OUTPUT")
-            print(String(repeating: "=", count: 60))
-            print("Find where the first divergence appears:")
-            print("  - If after input layernorm → RMSNorm bug")
-            print("  - If after attention → RoPE or attention bug")
-            print("  - If after MLP → MLP bug")
-            print(String(repeating: "=", count: 60) + "\n")
         } else {
-            print("❌ Layer 1 is not a TransformerBlock - skipping detailed instrumentation\n")
         }
 
         // CRITICAL FIX: Create causal mask for initial forward pass

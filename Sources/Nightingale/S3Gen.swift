@@ -44,16 +44,9 @@ private func mish(_ x: MLXArray) -> MLXArray {
     return x * tanh(softplus(x))
 }
 
-// Debug helper for tensor statistics
+// Debug helper for tensor statistics (no-op in production)
 private func debugStats(_ x: MLXArray, name: String) {
-    eval(x)
-    let mean = x.mean().item(Float.self)
-    let variance = x.variance().item(Float.self)
-    let std = sqrt(variance)
-    let minVal = x.min().item(Float.self)
-    let maxVal = x.max().item(Float.self)
-    print(String(format: "🔍 [%@] Shape: %@ | Mean: %.4f | Std: %.4f | Range: [%.4f, %.4f]",
-                 name, "\(x.shape)", mean, std, minVal, maxVal))
+    // No-op - debug prints removed
 }
 
 /// Reflection padding for time dimension (axis 1)
@@ -168,50 +161,27 @@ public class TimeMLP: Module {
     public func callAsFunction(_ t: MLXArray) -> MLXArray {
         if TimeMLP.debugEnabled {
             eval(t)
-            print("TimeMLP input t:"); fflush(stdout)
-            print("  shape: \(t.shape)"); fflush(stdout)
-            print("  values: \(t.asArray(Float.self))"); fflush(stdout)
         }
 
         let emb = sinusoidalEmbedding(t, dim: inputDim, scale: 1000.0)
 
         if TimeMLP.debugEnabled {
             eval(emb)
-            print("TimeMLP sinusoidal embedding:"); fflush(stdout)
-            print("  shape: \(emb.shape)"); fflush(stdout)
-            print("  min/max: [\(emb.min().item(Float.self)), \(emb.max().item(Float.self))]"); fflush(stdout)
-            print("  first 10: \(emb[0, 0..<10].asArray(Float.self))"); fflush(stdout)
-            print("  last 10: \(emb[0, emb.shape[1]-10..<emb.shape[1]].asArray(Float.self))"); fflush(stdout)
         }
 
         let afterLinear1 = linear1(emb)
         if TimeMLP.debugEnabled {
             eval(afterLinear1)
-            print("TimeMLP after Linear 1:"); fflush(stdout)
-            print("  shape: \(afterLinear1.shape)"); fflush(stdout)
-            print("  min/max: [\(afterLinear1.min().item(Float.self)), \(afterLinear1.max().item(Float.self))]"); fflush(stdout)
-            print("  first 5: \(afterLinear1[0, 0..<5].asArray(Float.self))"); fflush(stdout)
-            print("  linear1.weight[0,:5]: \(linear1.weight[0, 0..<5].asArray(Float.self))"); fflush(stdout)
-            if let b = linear1.bias { print("  linear1.bias[:5]: \(b[0..<5].asArray(Float.self))"); fflush(stdout) }
         }
 
         let afterSiLU = silu(afterLinear1)
         if TimeMLP.debugEnabled {
             eval(afterSiLU)
-            print("TimeMLP after SiLU:"); fflush(stdout)
-            print("  min/max: [\(afterSiLU.min().item(Float.self)), \(afterSiLU.max().item(Float.self))]"); fflush(stdout)
-            print("  first 5: \(afterSiLU[0, 0..<5].asArray(Float.self))"); fflush(stdout)
         }
 
         let result = linear2(afterSiLU)
         if TimeMLP.debugEnabled {
             eval(result)
-            print("TimeMLP after Linear 2:"); fflush(stdout)
-            print("  shape: \(result.shape)"); fflush(stdout)
-            print("  min/max: [\(result.min().item(Float.self)), \(result.max().item(Float.self))]"); fflush(stdout)
-            print("  first 5: \(result[0, 0..<5].asArray(Float.self))"); fflush(stdout)
-            print("  linear2.weight[0,:5]: \(linear2.weight[0, 0..<5].asArray(Float.self))"); fflush(stdout)
-            if let b = linear2.bias { print("  linear2.bias[:5]: \(b[0..<5].asArray(Float.self))"); fflush(stdout) }
         }
 
         return result
@@ -250,13 +220,9 @@ public class FlowMLP: Module {
 
     public func callAsFunction(_ x: MLXArray) -> MLXArray {
         var h = x
-        if FlowMLP.debugEnabled { eval(h); print("  FF input: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]") }
         h = layers[0](h)
-        if FlowMLP.debugEnabled { eval(h); print("  FF after layers[0]: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]") }
         h = gelu(h)
-        if FlowMLP.debugEnabled { eval(h); print("  FF after gelu: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]") }
         h = layers[1](h)
-        if FlowMLP.debugEnabled { eval(h); print("  FF after layers[1]: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]") }
         return h
     }
 }
@@ -298,9 +264,6 @@ public class MultiHeadAttention: Module {
 
         if debug {
             eval(q); eval(k); eval(v)
-            print("  ATTN[\(MultiHeadAttention.debugId)] Q: [\(q.min().item(Float.self)), \(q.max().item(Float.self))]")
-            print("  ATTN[\(MultiHeadAttention.debugId)] K: [\(k.min().item(Float.self)), \(k.max().item(Float.self))]")
-            print("  ATTN[\(MultiHeadAttention.debugId)] V: [\(v.min().item(Float.self)), \(v.max().item(Float.self))]")
         }
 
         // Reshape to (B, numHeads, L, headDim) for scaled dot product attention
@@ -314,7 +277,6 @@ public class MultiHeadAttention: Module {
 
         if debug {
             eval(scores)
-            print("  ATTN[\(MultiHeadAttention.debugId)] scores (before mask): [\(scores.min().item(Float.self)), \(scores.max().item(Float.self))]")
         }
 
         if let m = mask {
@@ -326,14 +288,12 @@ public class MultiHeadAttention: Module {
 
         if debug {
             eval(probs)
-            print("  ATTN[\(MultiHeadAttention.debugId)] probs: [\(probs.min().item(Float.self)), \(probs.max().item(Float.self))]")
         }
 
         var output = matmul(probs, v)
 
         if debug {
             eval(output)
-            print("  ATTN[\(MultiHeadAttention.debugId)] output (before reshape): [\(output.min().item(Float.self)), \(output.max().item(Float.self))]")
         }
 
         output = output.transposed(0, 2, 1, 3).reshaped([B, L, numHeads * headDim])
@@ -341,7 +301,6 @@ public class MultiHeadAttention: Module {
 
         if debug {
             eval(result)
-            print("  ATTN[\(MultiHeadAttention.debugId)] result (after outProj): [\(result.min().item(Float.self)), \(result.max().item(Float.self))]")
         }
 
         return result
@@ -440,17 +399,14 @@ public class S3ConformerFeedForward: Module {
         var h = w1(x)
         if S3ConformerFeedForward.debugEnabled {
             eval(h)
-            print("    FF after w1: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
         }
         h = silu(h) // Swish/SiLU for Conformer
         if S3ConformerFeedForward.debugEnabled {
             eval(h)
-            print("    FF after silu: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
         }
         h = w2(h)
         if S3ConformerFeedForward.debugEnabled {
             eval(h)
-            print("    FF after w2: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
         }
         return h
     }
@@ -460,10 +416,8 @@ public class S3ConformerFeedForward: Module {
         // NOTE: w_1 and w_2 weights are loaded via ChatterboxEngine.update()
         // DO NOT load them here to avoid double-transpose bug
         if let w = weights["\(prefix).w_1.weight"] {
-            print("  Found \(prefix).w_1.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
         }
         if let w = weights["\(prefix).w_2.weight"] {
-            print("  Found \(prefix).w_2.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
         }
     }
 }
@@ -491,33 +445,28 @@ public class ConformerBlock: Module {
         var h = x
         if ConformerBlock.debugEnabled {
             eval(h)
-            print("  ConformerBlock input: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
         }
 
         let res1 = h
         h = normMHA(h)
         if ConformerBlock.debugEnabled {
             eval(h)
-            print("  After normMHA: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
         }
 
         h = attention(h, mask: mask, posEmb: posEmb)
         if ConformerBlock.debugEnabled {
             eval(h)
-            print("  After attention: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
         }
 
         h = h + res1
         if ConformerBlock.debugEnabled {
             eval(h)
-            print("  After res1: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
         }
 
         let res2 = h
         h = normFF(h)
         if ConformerBlock.debugEnabled {
             eval(h)
-            print("  After normFF: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
         }
 
         if ConformerBlock.debugEnabled {
@@ -527,13 +476,11 @@ public class ConformerBlock: Module {
         if ConformerBlock.debugEnabled {
             S3ConformerFeedForward.debugEnabled = false
             eval(h)
-            print("  After feedForward: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
         }
 
         h = h + res2
         if ConformerBlock.debugEnabled {
             eval(h)
-            print("  ConformerBlock output: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
         }
         return h
     }
@@ -749,7 +696,6 @@ func applyMaskSmartGlobal(_ h: MLXArray, _ mask: MLXArray?, debug: Bool = false)
 
     let B = h.shape[0]
     if debug {
-        print("applyMaskSmart: h.shape=\(h.shape), mask.shape=\(m.shape), B=\(B)")
     }
     if B == 1 {
         // Single batch element - apply mask normally
@@ -761,25 +707,21 @@ func applyMaskSmartGlobal(_ h: MLXArray, _ mask: MLXArray?, debug: Bool = false)
             let maskSum = m[b].sum().item(Float.self)
             if debug {
                 eval(h[b])
-                print("applyMaskSmart: batch[\(b)] maskSum=\(maskSum), h range=[\(h[b].min().item(Float.self)), \(h[b].max().item(Float.self))]")
             }
             if maskSum > 0 {
                 // This batch element has a non-zero mask - apply it
                 result[b] = h[b] * m[b]
                 if debug {
                     eval(result[b])
-                    print("applyMaskSmart: batch[\(b)] MASKED, result range=[\(result[b].min().item(Float.self)), \(result[b].max().item(Float.self))]")
                 }
             } else {
                 if debug {
-                    print("applyMaskSmart: batch[\(b)] SKIPPED masking (unconditional pass)")
                 }
             }
             // If maskSum == 0, skip masking (CFG unconditional pass)
         }
         if debug {
             eval(result)
-            print("applyMaskSmart: final result range=[\(result.min().item(Float.self)), \(result.max().item(Float.self))]")
         }
         return result
     }
@@ -806,15 +748,11 @@ public class CausalBlock1D: Module {
             if CausalBlock1D.debugCalls {
                 eval(h)
                 eval(mask)
-                print("CAUSALBLOCK1D: x.shape=\(h.shape), mask.shape=\(mask.shape)")
-                print("CAUSALBLOCK1D: mask sum=\(mask.sum().item(Float.self)), mask.min=\(mask.min().item(Float.self)), mask.max=\(mask.max().item(Float.self))")
-                print("CAUSALBLOCK1D: h BEFORE mask: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
                 fflush(stdout)
             }
             h = applyMaskSmartGlobal(h, mask)
             if CausalBlock1D.debugCalls {
                 eval(h)
-                print("CAUSALBLOCK1D: h AFTER mask: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
                 fflush(stdout)
             }
         }
@@ -859,76 +797,26 @@ public class CausalResNetBlock: Module {
     }
 
     public func callAsFunction(_ x: MLXArray, mask: MLXArray? = nil, timeEmb: MLXArray) -> MLXArray {
-        CausalResNetBlock.callCount += 1
-        let isFirstCall = CausalResNetBlock.callCount == 1
-
-        if FlowMatchingDecoder.debugStep > 0 {
-            print("🔧 ResNet call #\(CausalResNetBlock.callCount), isFirstCall=\(isFirstCall), debugStep=\(FlowMatchingDecoder.debugStep)")
-        }
-
         var h = block1(x, mask: mask)
-        if CausalResNetBlock.debugEnabled { eval(h); print("RESNET block1: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]") }
 
-        // 🔍 DEBUG: After block1
-        if isFirstCall && FlowMatchingDecoder.debugStep > 0 {
-            debugStats(h, name: "DEBUG_after_block1")
-        }
-
-        // Python: mlp = Sequential(Mish(), Linear()) - mish BEFORE linear!
+        // mlp = Sequential(Mish(), Linear()) - mish BEFORE linear!
         var tEmb = mlpLinear(mish(timeEmb))
-        if CausalResNetBlock.debugEnabled { eval(tEmb); print("RESNET mlp_linear(mish(tEmb)): [\(tEmb.min().item(Float.self)), \(tEmb.max().item(Float.self))]") }
         tEmb = tEmb.expandedDimensions(axis: 2)
 
-        // 🔍 DEBUG: Time embedding
-        if isFirstCall && FlowMatchingDecoder.debugStep > 0 {
-            debugStats(tEmb, name: "DEBUG_tEmb")
-        }
-
         h = h + tEmb
-        if CausalResNetBlock.debugEnabled { eval(h); print("RESNET h + tEmb: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]") }
+        h = block2(h, mask: mask)
 
-        // 🔍 MICRO-BISECTION CHECKPOINT: After Time Embedding Injection
-        if isFirstCall && FlowMatchingDecoder.debugStep > 0 {
-            debugStats(h, name: "CHECKPOINT_B1_Norm1_Temb")
-        }
-
-        h = block2(h, mask: mask)  // block2 already handles masking (input AND output)
-        if CausalResNetBlock.debugEnabled { eval(h); print("RESNET block2: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]") }
-
-        // 🔍 MICRO-BISECTION CHECKPOINT: After Main Branch Output
-        if isFirstCall && FlowMatchingDecoder.debugStep > 0 {
-            debugStats(h, name: "CHECKPOINT_B2_Branch_Output")
-        }
-
-        // Python: res_conv with transpose, same as CausalBlock1D transpose pattern
-        // Python does: self.res_conv(x * mask) - simple element-wise multiplication!
-        // x is [B, C, T], Conv1d expects [B, T, C]
+        // res_conv with transpose
         var xForRes = x
         if let mask = mask {
-            xForRes = x * mask  // Simple multiplication, like Python!
+            xForRes = x * mask
         }
 
-        // 🔍 DEBUG: Before resConv (x * mask)
-        if isFirstCall && FlowMatchingDecoder.debugStep > 0 {
-            debugStats(xForRes, name: "DEBUG_xForRes_before_resConv")
-        }
-
-        var res = xForRes.transposed(0, 2, 1)  // [B, T, C]
-        res = resConv(res)                      // [B, T, Cout]
-        res = res.transposed(0, 2, 1)           // [B, Cout, T]
-        if CausalResNetBlock.debugEnabled { eval(res); print("RESNET resConv: [\(res.min().item(Float.self)), \(res.max().item(Float.self))]") }
-
-        // 🔍 MICRO-BISECTION CHECKPOINT: Skip Connection
-        if isFirstCall && FlowMatchingDecoder.debugStep > 0 {
-            debugStats(res, name: "CHECKPOINT_B3_Skip")
-        }
+        var res = xForRes.transposed(0, 2, 1)
+        res = resConv(res)
+        res = res.transposed(0, 2, 1)
 
         let output = h + res
-
-        // 🔍 MICRO-BISECTION CHECKPOINT: Final Sum
-        if isFirstCall && FlowMatchingDecoder.debugStep > 0 {
-            debugStats(output, name: "CHECKPOINT_B4_Final_Sum")
-        }
 
         return output
     }
@@ -958,37 +846,12 @@ public class FlowTransformerBlock: Module {
         var h = x
         let res1 = h
         h = norm1(h)
-        if FlowTransformerBlock.debugEnabled {
-            eval(h); print("TFMR[\(FlowTransformerBlock.debugBlockId),\(FlowTransformerBlock.debugTfmrId)] after norm1: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
-        }
         h = attention(h, mask: mask)
-        if FlowTransformerBlock.debugEnabled {
-            eval(h); print("TFMR[\(FlowTransformerBlock.debugBlockId),\(FlowTransformerBlock.debugTfmrId)] after attn: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
-        }
         h = h + res1
-        if FlowTransformerBlock.debugEnabled {
-            eval(h); print("TFMR[\(FlowTransformerBlock.debugBlockId),\(FlowTransformerBlock.debugTfmrId)] after res1: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
-        }
         let res2 = h
-        if FlowTransformerBlock.debugEnabled && FlowTransformerBlock.debugBlockId == 0 && FlowTransformerBlock.debugTfmrId == 0 {
-            if let w = norm2.weight { print("TFMR[0,0] norm2 weights: \(w[0..<3].asArray(Float.self))") }
-            if let b = norm2.bias { print("TFMR[0,0] norm2 bias: \(b[0..<3].asArray(Float.self))") }
-            print("TFMR[0,0] res2 (norm2 input): [\(res2.min().item(Float.self)), \(res2.max().item(Float.self))]")
-        }
         h = norm2(h)
-        if FlowTransformerBlock.debugEnabled {
-            eval(h); print("TFMR[\(FlowTransformerBlock.debugBlockId),\(FlowTransformerBlock.debugTfmrId)] after norm2: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
-            FlowMLP.debugEnabled = true
-        }
         h = ff(h)
-        FlowMLP.debugEnabled = false
-        if FlowTransformerBlock.debugEnabled {
-            eval(h); print("TFMR[\(FlowTransformerBlock.debugBlockId),\(FlowTransformerBlock.debugTfmrId)] after ff: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
-        }
         h = h + res2
-        if FlowTransformerBlock.debugEnabled {
-            eval(h); print("TFMR[\(FlowTransformerBlock.debugBlockId),\(FlowTransformerBlock.debugTfmrId)] after res2: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
-        }
         return h
     }
 }
@@ -1155,30 +1018,22 @@ public class FlowMatchingDecoder: Module {
                 let promptMean = promptRegion.mean().item(Float.self)
                 let generatedMean = generatedRegion.mean().item(Float.self)
                 let bias = generatedMean - promptMean
-                print("   \(label) SPATIAL: prompt=\(String(format: "%.4f", promptMean)), generated=\(String(format: "%.4f", generatedMean)), bias=\(String(format: "%.4f", bias))")
             }
         }
 
         if debug {
-            print("DEC: Entered callAsFunction, x.shape = \(x.shape), mask?.shape = \(mask?.shape ?? [0])")
             eval(x); eval(mu); eval(speakerEmb); eval(cond)
 
             // Show each batch element separately
             let B = x.shape[0]
             for b in 0..<B {
-                print("DEC: Batch[\(b)] inputs:")
                 let xb = x[b]
                 let mub = mu[b]
                 let spkb = speakerEmb[b]
                 let condb = cond[b]
                 eval(xb); eval(mub); eval(spkb); eval(condb)
-                print("  x:   [\(xb.min().item(Float.self)), \(xb.max().item(Float.self))], mean=\(xb.mean().item(Float.self))")
-                print("  mu:  [\(mub.min().item(Float.self)), \(mub.max().item(Float.self))], mean=\(mub.mean().item(Float.self))")
-                print("  spk: [\(spkb.min().item(Float.self)), \(spkb.max().item(Float.self))], mean=\(spkb.mean().item(Float.self))")
-                print("  cond:[\(condb.min().item(Float.self)), \(condb.max().item(Float.self))], mean=\(condb.mean().item(Float.self))")
             }
             fflush(stdout)
-            print("DEC: About to call timeMLP, t.shape = \(t.shape)")
             fflush(stdout)
         }
 
@@ -1186,10 +1041,6 @@ public class FlowMatchingDecoder: Module {
         let tEmb = timeMLP(t)
         eval(tEmb)
         if debug {
-            print("DEC: timeMLP output:")
-            print("  shape: \(tEmb.shape)")
-            print("  tEmb[0,:5]: \(tEmb[0, 0..<5].asArray(Float.self))")
-            print("  mean: \(tEmb.mean().item(Float.self))")
             fflush(stdout)
         }
 
@@ -1197,14 +1048,12 @@ public class FlowMatchingDecoder: Module {
         let spkExpanded = tiled(speakerEmb.expandedDimensions(axis: 2), repetitions: [1, 1, L])
 
         if debug {
-            print("DEC: spkExpanded created")
             fflush(stdout)
         }
 
         // Matches Python order: x, mu, spks, cond
         // x(80) + mu(80) + spk(80) + cond(80) = 320
         if debug {
-            print("DEC: Concatenation components (spatial bias):")
             checkSpatial(x, label: "  x")
             checkSpatial(mu, label: "  mu")
             checkSpatial(spkExpanded, label: "  spk_expanded")
@@ -1214,7 +1063,6 @@ public class FlowMatchingDecoder: Module {
         var h = concatenated([x, mu, spkExpanded, cond], axis: 1) // [B, 320, T]
         if debug {
             eval(h)
-            print("DEC: h concatenated, h.shape = \(h.shape), range=[\(h.min().item(Float.self)), \(h.max().item(Float.self))], mean=\(h.mean().item(Float.self))")
             checkSpatial(h, label: "01_concat")
             // ===== MICRO-BISECTION CHECKPOINT A: After input concatenation =====
             debugStats(h, name: "CHECKPOINT_A_input_concat")
@@ -1223,16 +1071,11 @@ public class FlowMatchingDecoder: Module {
 
         // Attention Mask: combines causal/non-causal pattern with padding mask
         if debug {
-            print("DEC: About to call makeAttentionMask(L=\(L))")
-            print("DEC: useFullAttention = \(useFullAttention)")
             fflush(stdout)
         }
         var attnMask = makeAttentionMask(L, paddingMask: mask)
         if debug {
-            print("DEC: makeAttentionMask returned, shape=\(attnMask.shape)")
             eval(attnMask)
-            print("DEC: attnMask[0,0,0,:5] = \(attnMask[0,0,0,0..<5].asArray(Float.self))")
-            print("DEC: attnMask[0,0,5,:5] = \(attnMask[0,0,5,0..<5].asArray(Float.self))")
             fflush(stdout)
         }
 
@@ -1240,13 +1083,11 @@ public class FlowMatchingDecoder: Module {
         let useMask = (mask != nil)
 
         if debug {
-            print("DEC: useMask=\(useMask), mask?.shape = \(mask?.shape ?? [0])")
             if let m = mask {
                 eval(m)
                 let B = m.shape[0]
                 for b in 0..<B {
                     let maskSum = m[b].sum().item(Float.self)
-                    print("DEC: mask[\(b)] sum = \(maskSum)")
                 }
             }
             fflush(stdout)
@@ -1280,7 +1121,6 @@ public class FlowMatchingDecoder: Module {
         if useMask, let providedMask = mask {
             masks = [providedMask]
             if debug {
-                print("DEC: Using provided mask, shape=\(providedMask.shape)")
                 fflush(stdout)
             }
         }
@@ -1290,11 +1130,8 @@ public class FlowMatchingDecoder: Module {
 
         if debug {
             if let md = maskDown {
-                print("DEC: maskDown.shape=\(md.shape), h.shape=\(h.shape)")
             } else {
-                print("DEC: maskDown=nil, h.shape=\(h.shape)")
             }
-            print("DEC: Calling down.resnet with mask=\(maskDown == nil ? "nil" : "provided")")
             fflush(stdout)
             CausalResNetBlock.debugEnabled = true
             CausalBlock1D.debugCalls = true  // Enable mask debugging
@@ -1304,7 +1141,6 @@ public class FlowMatchingDecoder: Module {
             CausalResNetBlock.debugEnabled = false
             CausalBlock1D.debugCalls = false
             eval(h)
-            print("DEC: down.resnet complete, h range: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
             checkSpatial(h, label: "02_down_resnet")
             // ===== MICRO-BISECTION CHECKPOINT B: After first ResNet =====
             debugStats(h, name: "CHECKPOINT_B_after_first_resnet")
@@ -1312,22 +1148,18 @@ public class FlowMatchingDecoder: Module {
         h = h.transposed(0, 2, 1)
         if debug {
             eval(h)
-            print("DEC: Transpose to [B,T,C] complete, h.shape=\(h.shape)")
         }
         if debug {
-            print("DEC transformers input h.shape: \(h.shape)")
             checkSpatial(h.transposed(0, 2, 1), label: "tfmr_input (B,C,T)")
         }
 
         for (ti, tfmr) in down.transformers.enumerated() {
             if debug && ti == 0 {
-                print("DEC FIRST TRANSFORMER - layer by layer:")
                 let h_in = h
                 checkSpatial(h_in.transposed(0, 2, 1), label: "  tfmr input (B,T,C)")
 
                 let h_normed = tfmr.norm1(h); eval(h_normed)
                 checkSpatial(h_normed.transposed(0, 2, 1), label: "  after norm1")
-                print("DEC tfmr.norm1: [\(h_normed.min().item(Float.self)), \(h_normed.max().item(Float.self))]")
 
                 // Enable detailed attention debug for first transformer
                 MultiHeadAttention.debugEnabled = true
@@ -1335,7 +1167,6 @@ public class FlowMatchingDecoder: Module {
                 let attn_out = tfmr.attention(h_normed, mask: attnMask); eval(attn_out)
                 checkSpatial(attn_out.transposed(0, 2, 1), label: "  after attn")
                 MultiHeadAttention.debugEnabled = false
-                print("DEC tfmr.attn: [\(attn_out.min().item(Float.self)), \(attn_out.max().item(Float.self))]")
 
                 let h_res1 = attn_out + h_in; eval(h_res1)
                 checkSpatial(h_res1.transposed(0, 2, 1), label: "  after residual1")
@@ -1352,14 +1183,12 @@ public class FlowMatchingDecoder: Module {
             h = tfmr(h, mask: attnMask)
             if debug {
                 eval(h)
-                print("DEC down.tfmr[\(ti)]: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
                 checkSpatial(h.transposed(0, 2, 1), label: "After tfmr[\(ti)] (B,C,T)")
             }
         }
         h = h.transposed(0, 2, 1)
         if debug {
             eval(h)
-            print("DEC after down.tfmrs (transposed): [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
             checkSpatial(h, label: "03_down_tfmrs")
             // ===== MICRO-BISECTION CHECKPOINT C: After first transformers =====
             debugStats(h, name: "CHECKPOINT_C_after_first_transformers")
@@ -1390,28 +1219,13 @@ public class FlowMatchingDecoder: Module {
 
         // Mid blocks use downsampled mask (or nil)
         let maskMid = useMask ? masks.last : nil
-        for (i, mid) in midBlocks.enumerated() {
-             if debug && i == 11 { CausalResNetBlock.debugEnabled = true }
+        for (_, mid) in midBlocks.enumerated() {
              h = mid.resnet(h, mask: maskMid, timeEmb: tEmb)
-             if debug && i == 11 { CausalResNetBlock.debugEnabled = false; eval(h); print("MID[11] after resnet: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]") }
              h = h.transposed(0, 2, 1) // [B, T, C]
-             for (ti, tfmr) in mid.transformers.enumerated() {
-                 // Enable detailed debug for mid block 11, transformers 2 and 3
-                 if debug && i == 11 && ti >= 2 {
-                     FlowTransformerBlock.debugEnabled = true
-                     FlowTransformerBlock.debugBlockId = i
-                     FlowTransformerBlock.debugTfmrId = ti
-                 }
+             for (_, tfmr) in mid.transformers.enumerated() {
                  h = tfmr(h, mask: attnMask)
-                 FlowTransformerBlock.debugEnabled = false
-                 if debug && i == 11 { eval(h); print("MID[11] tfmr[\(ti)]: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]") }
              }
              h = h.transposed(0, 2, 1)
-             if debug {
-                 eval(h)
-                 print("DEC after mid[\(i)]: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
-                 checkSpatial(h, label: String(format: "04_mid_%02d", i))
-             }
         }
 
         // ===== BISECTION CHECKPOINT 2: After mid_blocks =====
@@ -1424,8 +1238,6 @@ public class FlowMatchingDecoder: Module {
         let hTrunc = h[.ellipsis, 0..<skipLen]
         if debug {
             eval(h); eval(skip); eval(hTrunc)
-            print("DEC before concat: h=[\(h.min().item(Float.self)), \(h.max().item(Float.self))], skip=[\(skip.min().item(Float.self)), \(skip.max().item(Float.self))]")
-            print("DEC up concat: h=\(h.shape), skip=\(skip.shape), hTrunc=\(hTrunc.shape)")
             // Check spatial bias of h and skip separately
             checkSpatial(hTrunc, label: "05_h_before_concat")
             checkSpatial(skip, label: "05_skip_before_concat")
@@ -1433,7 +1245,6 @@ public class FlowMatchingDecoder: Module {
         h = concatenated([hTrunc, skip], axis: 1)
         if debug {
             eval(h)
-            print("DEC after concat: shape=\(h.shape), range=[\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
             checkSpatial(h, label: "05_skip_concat")
         }
 
@@ -1443,7 +1254,6 @@ public class FlowMatchingDecoder: Module {
         if debug && useMask {
             if let mf = maskFull {
                 eval(mf)
-                print("DEC up: maskFull.shape = \(mf.shape)")
             }
         }
 
@@ -1459,7 +1269,6 @@ public class FlowMatchingDecoder: Module {
         }
         if debug {
             eval(h)
-            print("DEC after up.resnet: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
             checkSpatial(h, label: "06_up_resnet")
         }
         h = h.transposed(0, 2, 1)
@@ -1470,14 +1279,11 @@ public class FlowMatchingDecoder: Module {
         h = h.transposed(0, 2, 1)
         if debug {
             eval(h)
-            print("DEC after up.transformers: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
             checkSpatial(h, label: "07_up_tfmrs")
             // Check per-channel bias after up.tfmrs
-            print("Channel-wise spatial bias after up.tfmrs:")
             for c in [0, 64, 128, 192, 255] {
                 let promptMean = h[0, c, 0..<500].mean().item(Float.self)
                 let genMean = h[0, c, 500...].mean().item(Float.self)
-                print(String(format: "  ch%3d: prompt=%.4f, gen=%.4f, bias=%.4f", c, promptMean, genMean, genMean - promptMean))
             }
         }
         // Python applies mask before upsample (only if using mask)
@@ -1487,14 +1293,12 @@ public class FlowMatchingDecoder: Module {
                 let ulConv = ul.conv
                 let ulWeight = ulConv.weight
                 eval(ulWeight)
-                print("upLayer.conv.weight shape=\(ulWeight.shape), range=[\(ulWeight.min().item(Float.self)), \(ulWeight.max().item(Float.self))], mean=\(ulWeight.mean().item(Float.self))")
                 if let ulBias = ulConv.bias {
                     eval(ulBias)
-                    print("upLayer.conv.bias shape=\(ulBias.shape), range=[\(ulBias.min().item(Float.self)), \(ulBias.max().item(Float.self))], mean=\(ulBias.mean().item(Float.self))")
                 }
             }
             if useMask, let mf = maskFull {
-                if debug { print("DEC: About to call applyMaskSmart before upLayer") }
+                if debug { }
                 let hMasked = applyMaskSmartGlobal(h, mf, debug: debug)
                 h = ul(hMasked)
             } else {
@@ -1502,14 +1306,11 @@ public class FlowMatchingDecoder: Module {
             }
             if debug {
                 eval(h)
-                print("DEC after up.upLayer: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
                 checkSpatial(h, label: "07b_after_upLayer")
                 // Check per-channel bias after upLayer
-                print("Channel-wise spatial bias after upLayer:")
                 for c in [0, 64, 128, 192, 255] {
                     let promptMean = h[0, c, 0..<500].mean().item(Float.self)
                     let genMean = h[0, c, 500...].mean().item(Float.self)
-                    print(String(format: "  ch%3d: prompt=%.4f, gen=%.4f, bias=%.4f", c, promptMean, genMean, genMean - promptMean))
                 }
             }
         }
@@ -1523,120 +1324,28 @@ public class FlowMatchingDecoder: Module {
         h = finalBlock(h, mask: maskFull) // [B, C, T] output
         if debug {
             eval(h)
-            print("DEC after finalBlock: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
             checkSpatial(h, label: "08_finalBlock")
             // Check per-channel bias after finalBlock
-            print("Channel-wise spatial bias after finalBlock:")
             for c in [0, 64, 128, 192, 255] {
                 let promptMean = h[0, c, 0..<500].mean().item(Float.self)
                 let genMean = h[0, c, 500...].mean().item(Float.self)
-                print(String(format: "  ch%3d: prompt=%.4f, gen=%.4f, bias=%.4f", c, promptMean, genMean, genMean - promptMean))
             }
         }
 
         // Python multiplies by mask before final_proj: output = self.final_proj(x * mask_up)
         if useMask, let mf = maskFull {
-            if debug {
-                eval(mf)
-                let maskPrompt = mf[0..., 0..., 0..<500].mean().item(Float.self)
-                let maskGen = mf[0..., 0..., 500...].mean().item(Float.self)
-                print("DEC mask before finalProj: prompt_mean=\(maskPrompt), gen_mean=\(maskGen)")
-            }
             h = applyMaskSmart(h, mf)
-            if debug { eval(h); print("DEC after mask (before finalProj): [\(h.min().item(Float.self)), \(h.max().item(Float.self))]") }
         }
 
         // Final Proj: MLX Conv1d expects input as [B, T, C] (channels LAST!)
-        if debug {
-            print("\nDEBUG finalProj:")
-            print("  Input h before transpose: shape=\(h.shape) (expecting [B, C, T])")
-        }
         h = h.transposed(0, 2, 1) // [B, C, T] → [B, T, C]
-        if debug {
-            print("  After transpose h.shape=\(h.shape) (expecting [B, T, C])")
-            eval(h)
-            let hBCT = h.transposed(0, 2, 1)  // Back to [B, C, T] for spatial check
-            eval(hBCT)
-            checkSpatial(hBCT, label: "08b_before_finalProj")
-            // Check spatial for first few timesteps
-            let t0_prompt_slice = h[0, 0..<10, 0...]
-            let t0_gen_slice = h[0, 500..<510, 0...]
-            eval(t0_prompt_slice); eval(t0_gen_slice)
-            let t0_prompt = t0_prompt_slice.mean().item(Float.self)
-            let t0_gen = t0_gen_slice.mean().item(Float.self)
-            print(String(format: "  Time-wise check: t[0:10]=%.4f, t[500:510]=%.4f, diff=%.4f", t0_prompt, t0_gen, t0_gen - t0_prompt))
-        }
-
-        // FORENSIC: Save ODE output before finalProj
-        if debug {
-            let forensicDir = "../test_audio/forensic"
-            let odeOutputPath = forensicDir + "/swift_ode_output.safetensors"
-            eval(h)
-            try? MLX.save(arrays: ["ode_output": h], url: URL(fileURLWithPath: odeOutputPath))
-            print("  [FORENSIC] Saved ODE output (before finalProj): \(odeOutputPath)")
-            print("  [FORENSIC] ODE output shape: \(h.shape), range: [\(h.min().item(Float.self)), \(h.max().item(Float.self))], mean: \(h.mean().item(Float.self))")
-        }
 
         h = finalProj(h)          // [B, T, 80]
-
-        // TODO: ROOT CAUSE INVESTIGATION NEEDED
-        // Current status: Swift mel is ~1.5 dB darker than Python
-        // Need forensic comparison of actual mel values (not inferred from audio)
-        // See: E2E/FORENSIC_INVESTIGATION_PLAN.md
-
-        // For now: Output RAW for forensic comparison
-        if debug {
-            eval(h)
-            print("  [FORENSIC] After finalProj (RAW) h.shape=\(h.shape)")
-            print("  [FORENSIC] After finalProj (RAW) range=[\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
-            print("  [FORENSIC] After finalProj (RAW) mean=\(h.mean().item(Float.self))")
-            print("  [FORENSIC] Expected Python: mean≈-5.81, max=0.00")
-
-            // TEMPORARY: Save mel for forensic comparison
-            let forensicDir = "../test_audio/forensic"
-            try? FileManager.default.createDirectory(atPath: forensicDir, withIntermediateDirectories: true)
-            let forensicPath = forensicDir + "/swift_mel_raw.safetensors"
-
-            // h is [B, T, 80], transpose to [B, 80, T] for saving
-            let hTransposed = h.transposed(0, 2, 1)
-            eval(hTransposed)
-            try? MLX.save(arrays: ["mel_gen": hTransposed], url: URL(fileURLWithPath: forensicPath))
-            print("  [FORENSIC] Saved mel to: \(forensicPath)")
-        }
         h = h.transposed(0, 2, 1) // [B, T, 80] → [B, 80, T]
-        if debug {
-            eval(h)
-            print("DEC after finalProj+correction: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
-            print("DEC mean after correction: \(h.mean().item(Float.self))")
-            checkSpatial(h, label: "09_finalProj_corrected")
-        }
 
         // Python multiplies by mask after final_proj: return output * mask
         if useMask, let mf = maskFull {
             h = applyMaskSmart(h, mf)
-        }
-
-        if debug {
-            eval(h)
-            print("DEC output: [\(h.min().item(Float.self)), \(h.max().item(Float.self))]")
-            // Show each batch element output
-            let B = h.shape[0]
-            for b in 0..<B {
-                let hb = h[b]
-                eval(hb)
-                print("DEC Batch[\(b)] output: [\(hb.min().item(Float.self)), \(hb.max().item(Float.self))], mean=\(hb.mean().item(Float.self))")
-            }
-
-            // Check spatial variation in vCond (Batch[0]) output
-            let T = h.shape[2]
-            if T == 748 {
-                let L_pm = 500
-                let vCondPrompt = h[0, 0..., 0..<L_pm]
-                let vCondGenerated = h[0, 0..., L_pm...]
-                eval(vCondPrompt); eval(vCondGenerated)
-                print("DEC vCond (Batch[0]) SPATIAL - prompt[0..<\(L_pm)]: [\(vCondPrompt.min().item(Float.self)), \(vCondPrompt.max().item(Float.self))], mean=\(vCondPrompt.mean().item(Float.self))")
-                print("DEC vCond (Batch[0]) SPATIAL - generated[\(L_pm)...]: [\(vCondGenerated.min().item(Float.self)), \(vCondGenerated.max().item(Float.self))], mean=\(vCondGenerated.mean().item(Float.self))")
-            }
         }
 
         return h
@@ -1974,8 +1683,6 @@ public class Mel2Wav: Module {
     public func callAsFunction(_ mel: MLXArray) -> MLXArray {
         if Mel2Wav.debugEnabled {
             eval(mel)
-            print("🔍 VOC INPUT: mel.shape = \(mel.shape)")
-            print("   Expected from decoder: [B, 80, T] (channels first)")
         }
 
         // mel: [B, 80, L] -> [B, L, 80]
@@ -1983,16 +1690,12 @@ public class Mel2Wav: Module {
 
         if Mel2Wav.debugEnabled {
             eval(x)
-            print("🔍 VOC AFTER TRANSPOSE: x.shape = \(x.shape)")
-            print("   Should be: [B, T, 80] (channels last for MLX Conv1d)")
         }
 
         // F0 Prediction
         let f0 = f0Predictor(x) // [B, T]
         if Mel2Wav.debugEnabled {
             eval(f0)
-            print("VOC F0: shape=\(f0.shape), range=[\(f0.min().item(Float.self)), \(f0.max().item(Float.self))]")
-            print("VOC F0 first 20: \(Array(f0[0, 0..<20].asArray(Float.self)))")
         }
 
         // Upsample F0
@@ -2003,26 +1706,20 @@ public class Mel2Wav: Module {
         let f0Flat = f0Upsampled.expandedDimensions(axis: 2) // [B, T_high, 1]
         if Mel2Wav.debugEnabled {
             eval(f0Flat)
-            print("VOC f0Flat: shape=\(f0Flat.shape), range=[\(f0Flat.min().item(Float.self)), \(f0Flat.max().item(Float.self))]")
         }
 
         // Generate Source
         if Mel2Wav.debugEnabled {
             let linearW = mSource.linear.weight
             eval(linearW)
-            print("VOC mSource.linear.weight: shape=\(linearW.shape), values=\(linearW.flattened().asArray(Float.self))")
             if let linearB = mSource.linear.bias {
                 eval(linearB)
-                print("VOC mSource.linear.bias: \(linearB.asArray(Float.self))")
             } else {
-                print("VOC mSource.linear has NO bias")
             }
         }
         let (s, _, _) = mSource(f0Flat) // [B, T_high, 1]
         if Mel2Wav.debugEnabled {
             eval(s)
-            print("VOC source (s): shape=\(s.shape), range=[\(s.min().item(Float.self)), \(s.max().item(Float.self))]")
-            print("VOC source first 20: \(Array(s[0, 0..<20, 0].asArray(Float.self)))")
         }
         
         // Source STFT
@@ -2032,17 +1729,11 @@ public class Mel2Wav: Module {
 
         if Mel2Wav.debugEnabled {
             eval(sSTFT)
-            print("\n--- Step 0c: Source STFT ---")
-            print("   s_stft shape: \(sSTFT.shape)")
-            print("   s_stft range: [\(sSTFT.min().item(Float.self)), \(sSTFT.max().item(Float.self))]")
         }
 
         // CRITICAL DEBUG: Check Conv1d weight shape to detect transposition issue
         if Mel2Wav.debugEnabled {
             eval(convPre.weight)
-            print("\n🔍 VOCODER convPre.weight shape: \(convPre.weight.shape)")
-            print("   Expected MLX format: [out_channels(512), kernel_size(7), in_channels(80)]")
-            print("   PyTorch format would be: [out_channels(512), in_channels(80), kernel_size(7)]")
         }
 
         // Main Path
@@ -2050,29 +1741,21 @@ public class Mel2Wav: Module {
 
         if Mel2Wav.debugEnabled {
             eval(x)
-            print("\n--- Step 1: conv_pre ---")
-            print("   Shape: \(x.shape)")
-            print("   Range: [\(x.min().item(Float.self)), \(x.max().item(Float.self))]")
-            print("   Mean: \(x.mean().item(Float.self)), Std: \(x.variance().sqrt().item(Float.self))")
         }
 
         for i in 0..<ups.count {
             if Mel2Wav.debugEnabled {
-                print("\n--- Upsampling Stage \(i) ---")
             }
 
             x = leakyRelu(x, negativeSlope: 0.1)
 
             if Mel2Wav.debugEnabled {
-                print("   Before ups[\(i)]: \(x.shape)")
             }
 
             x = ups[i](x)  // Upsample
 
             if Mel2Wav.debugEnabled {
                 eval(x)
-                print("   After ups[\(i)]: \(x.shape)")
-                print("   Range: [\(x.min().item(Float.self)), \(x.max().item(Float.self))]")
             }
 
             // Source Fusion
@@ -2094,21 +1777,18 @@ public class Mel2Wav: Module {
 
             if Mel2Wav.debugEnabled && i == 0 {
                 eval(siLocal)
-                print("   🔍 DEBUG source stage \(i): After transpose: shape=\(siLocal.shape), range=[\(siLocal.min().item(Float.self)), \(siLocal.max().item(Float.self))], mean=\(siLocal.mean().item(Float.self))")
             }
 
             siLocal = sourceDowns[i](siLocal)
 
             if Mel2Wav.debugEnabled && i == 0 {
                 eval(siLocal)
-                print("   🔍 DEBUG source stage \(i): After sourceDowns: shape=\(siLocal.shape), range=[\(siLocal.min().item(Float.self)), \(siLocal.max().item(Float.self))], mean=\(siLocal.mean().item(Float.self))")
             }
 
             siLocal = sourceResBlocks[i](siLocal)
 
             if Mel2Wav.debugEnabled {
                 eval(siLocal)
-                print("   Source fusion add (after sourceResBlocks[\(i)]): mean=\(siLocal.mean().item(Float.self)), range=[\(siLocal.min().item(Float.self)), \(siLocal.max().item(Float.self))]")
             }
 
             // Add to x. Check shapes.
@@ -2133,9 +1813,6 @@ public class Mel2Wav: Module {
 
             if Mel2Wav.debugEnabled {
                 eval(x)
-                print("   After ResBlocks: \(x.shape)")
-                print("   Range: [\(x.min().item(Float.self)), \(x.max().item(Float.self))]")
-                print("   Mean: \(x.mean().item(Float.self)), Std: \(x.variance().sqrt().item(Float.self))")
             }
         }
 
@@ -2146,10 +1823,6 @@ public class Mel2Wav: Module {
 
         if Mel2Wav.debugEnabled {
             eval(x)
-            print("🔍 VOC conv_post output (STFT params):")
-            print("   Shape: \(x.shape)")
-            print("   Range: [\(x.min().item(Float.self)), \(x.max().item(Float.self))]")
-            print("   Mean: \(x.mean().item(Float.self))")
 
             // Check magnitude/phase before ISTFT
             let nHalf = 9
@@ -2157,12 +1830,6 @@ public class Mel2Wav: Module {
             let phaseSin = sin(x[0..., 0..., nHalf...])
             eval(mag)
             eval(phaseSin)
-            print("🔍 VOC Magnitude (before ISTFT):")
-            print("   Shape: \(mag.shape), Range: [\(mag.min().item(Float.self)), \(mag.max().item(Float.self))]")
-            print("   Mean: \(mag.mean().item(Float.self))")
-            print("🔍 VOC Phase/sin (before ISTFT):")
-            print("   Shape: \(phaseSin.shape), Range: [\(phaseSin.min().item(Float.self)), \(phaseSin.max().item(Float.self))]")
-            print("   Mean: \(phaseSin.mean().item(Float.self))")
         }
 
         // ISTFT and clip audio to [-0.99, 0.99] (matching Python line 794)
@@ -2653,7 +2320,6 @@ public class S3Gen: Module {
             throw NSError(domain: "S3Gen", code: 1, userInfo: [NSLocalizedDescriptionKey: "fixed_noise not found in safetensors"])
         }
         self.fixedNoise = noise
-        print("Loaded Python fixed noise: shape=\(noise.shape), range=[\(noise.min().item(Float.self)), \(noise.max().item(Float.self))]")
     }
     
     public func generate(tokens: MLXArray, speakerEmb: MLXArray, speechEmbMatrix: MLXArray, promptToken: MLXArray, promptFeat: MLXArray) -> MLXArray {
@@ -2931,12 +2597,10 @@ public class S3Gen: Module {
         }
 
         eval(xt)
-        print("  🔍 getEncoderAndFlowOutput: xt.shape before return: \(xt.shape)")
         // Return FULL mel (including prompt) for testing
         // In production, you might want to slice: xt[0..., 0..., L_pm...] to get only new frames
         let generatedMel = xt  // Return full 696 frames
         eval(generatedMel)
-        print("  🔍 getEncoderAndFlowOutput: returning mel.shape: \(generatedMel.shape)")
         return generatedMel
     }
 
@@ -2964,11 +2628,6 @@ public class S3Gen: Module {
         var currentT = tSpan[0]
         var dt = tSpan[1] - tSpan[0]
 
-        print("\n📊 ODE-Only Configuration:")
-        print("   n_timesteps: \(nTimesteps)")
-        print("   CFG rate: \(cfgRate)")
-        print("   t_span: \(tSpan)")
-        print("   Initial noise: [\(xt.min().item(Float.self)), \(xt.max().item(Float.self))]")
 
         for step in 1...nTimesteps {
             let t = MLXArray([currentT])
@@ -3001,7 +2660,6 @@ public class S3Gen: Module {
 
             if step == 1 || step == nTimesteps {
                 eval(xt)
-                print("  Step \(step): t=\(String(format: "%.4f", currentT-dt)), x=[\(xt.min().item(Float.self)), \(xt.max().item(Float.self))]")
             }
         }
 
@@ -3027,20 +2685,11 @@ public class S3Gen: Module {
         let clippedInputs = clip(inputs, min: 0, max: vocabSize - 1)
         let x = inputEmbedding(clippedInputs)
         eval(x)
-        print("\n=== Swift Encoder Tracing ===")
-        print("1. Concatenated tokens: \(inputs.shape)")
-        print("2. Token embedding: \(x.shape)")
-        print("   Range: [\(x.min().item(Float.self)), \(x.max().item(Float.self))]")
-        print("   Mean: \(x.mean().item(Float.self))")
 
         // Encoder outputs [1, T, 512], need to project to [1, T, 80]
         let h = encoder(x)
         let mu = encoderProj(h)
         eval(mu)
-        print("3. Encoder output (mu): \(mu.shape)")
-        print("   Range: [\(mu.min().item(Float.self)), \(mu.max().item(Float.self))]")
-        print("   Mean: \(mu.mean().item(Float.self))")
-        print("=== End Swift Encoder Tracing ===\n")
 
         let promptMel = promptFeat
         let L_pm = promptMel.shape[1]
@@ -3058,8 +2707,6 @@ public class S3Gen: Module {
         traceData["conds_t"] = condsT
         traceData["initial_noise"] = xt
 
-        print("=== Swift ODE Trace ===\n")
-        print("Saving ODE traces to \(tracePath)...")
 
         let nTimesteps = 10
         let cfgRate: Float = 0.7  // Match Python decoder CFG
@@ -3107,10 +2754,6 @@ public class S3Gen: Module {
             eval(xt)
             traceData["xt_after_step\(step)"] = xt.asType(.float32)
 
-            print("Step \(step): t=\(String(format: "%.4f", currentT)) dt=\(String(format: "%.4f", dt))")
-            print("  v_batch: range=[\(vBatch.min().item(Float.self)), \(vBatch.max().item(Float.self))], mean=\(vBatch.mean().item(Float.self))")
-            print("  v (CFG): range=[\(v.min().item(Float.self)), \(v.max().item(Float.self))], mean=\(v.mean().item(Float.self))")
-            print("  xt_after: range=[\(xt.min().item(Float.self)), \(xt.max().item(Float.self))], mean=\(xt.mean().item(Float.self))")
 
             currentT = currentT + dt
             if step < nTimesteps {
@@ -3125,17 +2768,12 @@ public class S3Gen: Module {
         // Save final mel
         traceData["final_mel"] = generatedMel.asType(.float32)
 
-        print("\nFinal mel: shape=\(generatedMel.shape), range=[\(generatedMel.min().item(Float.self)), \(generatedMel.max().item(Float.self))], mean=\(generatedMel.mean().item(Float.self))")
 
         // Save all traces to file
-        print("\n--- Saving Trace ---")
         try MLX.save(arrays: traceData, url: URL(fileURLWithPath: tracePath))
-        print("Saved \(traceData.count) tensors to \(tracePath)")
-        print("\nSaved tensors:")
         for key in traceData.keys.sorted() {
             let arr = traceData[key]!
             eval(arr)
-            print("  \(key): \(arr.shape)")
         }
 
         let wav = vocoder(generatedMel)

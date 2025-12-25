@@ -85,7 +85,6 @@ public class AlignmentStreamAnalyzer {
         self.eosIdx = eosIdx
         self.textLength = textTokensSlice.1 - textTokensSlice.0
 
-        print("AlignmentStreamAnalyzer: Initialized with text slice (\(textTokensSlice.0), \(textTokensSlice.1)), length=\(textLength)")
     }
 
     /// Process one generation step
@@ -107,15 +106,12 @@ public class AlignmentStreamAnalyzer {
         var attentionChunks: [MLXArray] = []
 
         if currFramePos == 0 {
-            print("DEBUG Analyzer: First step - extracting attention from \(attentionWeights.count) layers")
             for (layer, attn) in attentionWeights {
-                print("  Layer \(layer): shape \(attn.shape)")
             }
         }
 
         for (layerIdx, headIdx) in Self.alignedHeads {
             guard let layerAttn = attentionWeights[layerIdx] else {
-                print("WARNING: Missing attention for layer \(layerIdx)")
                 continue
             }
 
@@ -272,8 +268,6 @@ public class AlignmentStreamAnalyzer {
         }
 
         if tokenRepetition {
-            print("🚨 AlignmentStreamAnalyzer: Detected 8x repetition of token \(generatedTokens.last ?? -1)")
-            print("   Token sequence (\(generatedTokens.count) tokens): \(generatedTokens)")
         }
 
         // ============================================
@@ -293,7 +287,6 @@ public class AlignmentStreamAnalyzer {
 
         // Force EOS on detected errors
         if longTail || alignmentRepetition || tokenRepetition {
-            print("⚠️ AlignmentStreamAnalyzer: Forcing EOS - longTail=\(longTail), alignmentRepetition=\(alignmentRepetition), tokenRepetition=\(tokenRepetition)")
             // Set all logits to -inf except EOS
             var logitsArray = [Float](repeating: -32768.0, count: modifiedLogits.shape[0])
             logitsArray[eosIdx] = 32768.0  // +2^15

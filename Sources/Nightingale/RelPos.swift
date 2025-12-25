@@ -19,8 +19,6 @@ public class EspnetRelPositionalEncoding: Module {
     public init(dModel: Int, dropoutRate: Float = 0.1) {
         // 🚨 RED HANDED CHECK
         if dModel == 80 {
-            print("🚨🚨🚨 CAUGHT RED HANDED: EspnetRelPositionalEncoding initialized with dModel=80!")
-            print("🚨 Stack trace will show the caller")
             fatalError("EspnetRelPositionalEncoding: dModel cannot be 80 (mel_channels)! Should be 512 or 256.")
         }
 
@@ -126,20 +124,13 @@ public class RelPositionMultiHeadAttention: Module {
 
         // 🚨 RED HANDED CHECK
         if dHead == 80 {
-            print("🚨🚨🚨 CAUGHT RED HANDED: RelPositionMultiHeadAttention initialized with dHead=80!")
-            print("   dModel=\(dModel), numHeads=\(numHeads), dHead=\(dHead)")
-            print("   This will cause broadcast errors!")
             fflush(stdout)
             fatalError("RelPositionMultiHeadAttention: dHead cannot be 80 (mel_channels)!")
         }
         if dModel == 80 {
-            print("🚨 WARNING: RelPositionMultiHeadAttention initialized with dModel=80 (mel_channels)!")
-            print("   dModel=\(dModel), numHeads=\(numHeads), computed dHead=\(dHead)")
             fflush(stdout)
         }
         if dModel == 640 {
-            print("🚨 SUSPICIOUS: RelPositionMultiHeadAttention initialized with dModel=640 (8*80)!")
-            print("   This means dHead=\(dHead) which is 80 (melChannels), NOT 64!")
             fflush(stdout)
             fatalError("RelPositionMultiHeadAttention: dModel=640 is wrong! Should be 512.")
         }
@@ -231,19 +222,14 @@ public class RelPositionMultiHeadAttention: Module {
         // DO NOT load them here to avoid double-transpose bug
         // Only verify they exist and log for debugging
         if let w = weights["\(prefix).linear_q.weight"] {
-            print("  Found \(prefix).linear_q.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
         }
         if let w = weights["\(prefix).linear_k.weight"] {
-            print("  Found \(prefix).linear_k.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
         }
         if let w = weights["\(prefix).linear_v.weight"] {
-            print("  Found \(prefix).linear_v.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
         }
         if let w = weights["\(prefix).linear_out.weight"] {
-            print("  Found \(prefix).linear_out.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
         }
         if let w = weights["\(prefix).linear_pos.weight"] {
-            print("  Found \(prefix).linear_pos.weight: \(w.shape) - will be loaded via ChatterboxEngine.update()")
         }
 
         // Load positional biases
@@ -251,10 +237,6 @@ public class RelPositionMultiHeadAttention: Module {
             eval(u)
             let expectedShape = [numHeads, dHead]
             if u.shape.count != 2 || u.shape[0] != expectedShape[0] || u.shape[1] != expectedShape[1] {
-                print("⚠️  ERROR: pos_bias_u shape mismatch!")
-                print("   Prefix: \(prefix)")
-                print("   Expected: \(expectedShape), Got: \(u.shape)")
-                print("   dModel=\(dModel), numHeads=\(numHeads), dHead=\(dHead)")
                 fatalError("pos_bias_u has wrong shape - expected [\(numHeads), \(dHead)], got \(u.shape)")
             }
             posBiasU = u
@@ -263,10 +245,6 @@ public class RelPositionMultiHeadAttention: Module {
             eval(v)
             let expectedShape = [numHeads, dHead]
             if v.shape.count != 2 || v.shape[0] != expectedShape[0] || v.shape[1] != expectedShape[1] {
-                print("⚠️  ERROR: pos_bias_v shape mismatch!")
-                print("   Prefix: \(prefix)")
-                print("   Expected: \(expectedShape), Got: \(v.shape)")
-                print("   dModel=\(dModel), numHeads=\(numHeads), dHead=\(dHead)")
                 fatalError("pos_bias_v has wrong shape - expected [\(numHeads), \(dHead)], got \(v.shape)")
             }
             posBiasV = v

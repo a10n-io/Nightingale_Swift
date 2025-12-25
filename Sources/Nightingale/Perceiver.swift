@@ -39,13 +39,11 @@ public class PerceiverAttention: Module {
             if array.dtype == .float32 {
                 return array
             } else {
-                print("  ⚠️ Converting \(name) from \(array.dtype) to FP32")
                 return array.asType(.float32)
             }
         }
 
         // Load weights using update(parameters:) with explicit FP32 conversion
-        print("PerceiverAttention: Loading weights with FP32 precision...")
 
         if let w = weights["\(prefix).norm.weight"], let b = weights["\(prefix).norm.bias"] {
             let wFP32 = ensureFP32(w, name: "\(prefix).norm.weight")
@@ -89,7 +87,6 @@ public class PerceiverAttention: Module {
             projOut.update(parameters: ModuleParameters.unflattened(params))
         }
 
-        print("PerceiverAttention: All weights loaded with FP32 precision")
     }
 
     /// Forward pass with cross-attention (query attends to key/value)
@@ -149,11 +146,8 @@ public class Perceiver: Module {
             // Ensure FP32 precision for learned queries
             if query.dtype == .float32 {
                 self.preAttentionQuery = query
-                print("Perceiver: Loaded pre_attention_query shape: \(query.shape), dtype: FP32")
             } else {
-                print("Perceiver: Converting pre_attention_query from \(query.dtype) to FP32")
                 self.preAttentionQuery = query.asType(.float32)
-                print("Perceiver: Loaded pre_attention_query shape: \(self.preAttentionQuery.shape), dtype: FP32")
             }
         } else {
             // Initialize with small random values (shouldn't happen if weights loaded correctly)
@@ -163,7 +157,6 @@ public class Perceiver: Module {
                 high: MLXArray(variance),
                 [1, queryTokens, channels]
             )
-            print("Perceiver: WARNING - pre_attention_query not found, using random init")
         }
 
         // Attention block for cross-attention and self-attention (with FP32 weights)

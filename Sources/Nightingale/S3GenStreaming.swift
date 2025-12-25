@@ -111,7 +111,6 @@ public class S3GenStreaming {
         eval(cachedSpkCond!, cachedPromptEncoding!, cachedMu!)
 
         let elapsed = Date().timeIntervalSince(startTime)
-        print("📦 S3GenStreaming: Cached prompt (\(promptTokenCount) tokens) in \(String(format: "%.0f", elapsed * 1000))ms")
     }
 
     /// Cached ODE output (mel spectrogram) for already-generated regions
@@ -126,7 +125,6 @@ public class S3GenStreaming {
     public func generateIncremental(newTokens: [Int]) -> [Float] {
         guard let cachedPromptMel = cachedPromptMel,
               let cachedSpkCond = cachedSpkCond else {
-            print("⚠️ S3GenStreaming: Not initialized - call initializeWithPrompt first")
             return []
         }
 
@@ -301,8 +299,6 @@ public class S3GenStreaming {
         let vocoderTime = Date().timeIntervalSince(vocoderStart)
         let totalTime = Date().timeIntervalSince(startTime)
 
-        print("🔊 S3GenStreaming: \(newTokens.count) tokens → \(newSamples.count) samples (\(String(format: "%.0f", Double(newSamples.count) / 24.0))ms audio) [Window: \(windowLen) frames]")
-        print("   Encoder: \(String(format: "%.0f", encoderTime * 1000))ms | ODE: \(String(format: "%.0f", odeTime * 1000))ms | Vocoder: \(String(format: "%.0f", vocoderTime * 1000))ms | Total: \(String(format: "%.0f", totalTime * 1000))ms")
 
         return newSamples
     }
@@ -319,7 +315,6 @@ public class S3GenStreaming {
         processedTokens = []
         generatedSamples = []
         isFirstChunk = true  // Reset for next utterance
-        print("🔄 S3GenStreaming: State reset")
     }
 
     /// Flush any remaining audio (call after last chunk)
@@ -350,7 +345,6 @@ extension ChatterboxEngine {
     /// Create a streaming S3Gen wrapper using the loaded model
     public func createStreamingS3Gen() async -> S3GenStreaming? {
         guard let s3gen = await self.getS3Gen() else {
-            print("⚠️ S3Gen not loaded")
             return nil
         }
         return S3GenStreaming(s3gen: s3gen)
