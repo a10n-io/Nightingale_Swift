@@ -211,13 +211,6 @@ public class FlowEmbedding: Module {
     let posEnc: EspnetRelPositionalEncoding
 
     public init(inputDim: Int, outputDim: Int, weights: [String: MLXArray], prefix: String) {
-        // DEBUG: Check what keys are available
-        let linearKey = "\(prefix).linear.weight"
-        let normWeightKey = "\(prefix).norm.weight"
-
-        // Print all keys matching prefix
-        let matchingKeys = weights.keys.filter { $0.hasPrefix(prefix) }.sorted()
-
         // Use LinearFactory to handle quantized weights
         self.linear = LinearFactory.load("\(prefix).linear", inputDim: inputDim, outputDim: outputDim, weights: weights, bias: true)
         self.norm = LayerNorm(dimensions: outputDim)
@@ -228,17 +221,14 @@ public class FlowEmbedding: Module {
         // Load norm weights (not quantized)
         if let w = weights["\(prefix).norm.weight"] {
             norm.update(parameters: ModuleParameters.unflattened(["weight": w]))
-        } else {
         }
         if let b = weights["\(prefix).norm.bias"] {
             norm.update(parameters: ModuleParameters.unflattened(["bias": b]))
-        } else {
         }
 
         // Load positional encoding weights
         if let pe = weights["\(prefix).pos_enc.pe"] {
             posEnc.pe = pe
-        } else {
         }
     }
 
@@ -268,14 +258,7 @@ public class PreLookaheadLayer: Module {
         self.conv2 = Conv1d(inputChannels: dim, outputChannels: dim, kernelSize: 3, padding: 0)
 
         super.init()
-
         // NOTE: conv1 and conv2 weights are loaded later via ChatterboxEngine.update()
-        // DO NOT transpose weights here to avoid double-transpose bug
-        // Conv1d weights will be transposed once in remapS3Keys() and applied via update()
-        if let w = weights["\(prefix).conv1.weight"] {
-        }
-        if let w = weights["\(prefix).conv2.weight"] {
-        }
     }
 
     public func callAsFunction(_ x: MLXArray) -> MLXArray {

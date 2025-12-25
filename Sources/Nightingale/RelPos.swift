@@ -17,7 +17,7 @@ public class EspnetRelPositionalEncoding: Module {
     public var pe: MLXArray
     
     public init(dModel: Int, dropoutRate: Float = 0.1) {
-        // 🚨 RED HANDED CHECK
+        // Dimension validation
         if dModel == 80 {
             fatalError("EspnetRelPositionalEncoding: dModel cannot be 80 (mel_channels)! Should be 512 or 256.")
         }
@@ -119,19 +119,11 @@ public class RelPositionMultiHeadAttention: Module {
         self.dHead = dModel / numHeads
         self.scale = 1.0 / sqrt(Float(dHead))
 
-        // 🔍 DEBUG: Print ALL RelPositionMultiHeadAttention initializations
-        fflush(stdout)
-
-        // 🚨 RED HANDED CHECK
+        // Dimension validation
         if dHead == 80 {
-            fflush(stdout)
             fatalError("RelPositionMultiHeadAttention: dHead cannot be 80 (mel_channels)!")
         }
-        if dModel == 80 {
-            fflush(stdout)
-        }
         if dModel == 640 {
-            fflush(stdout)
             fatalError("RelPositionMultiHeadAttention: dModel=640 is wrong! Should be 512.")
         }
 
@@ -220,18 +212,6 @@ public class RelPositionMultiHeadAttention: Module {
     public func load(weights: [String: MLXArray], prefix: String) {
         // NOTE: Q, K, V, Out, and Pos projection weights are loaded via ChatterboxEngine.update()
         // DO NOT load them here to avoid double-transpose bug
-        // Only verify they exist and log for debugging
-        if let w = weights["\(prefix).linear_q.weight"] {
-        }
-        if let w = weights["\(prefix).linear_k.weight"] {
-        }
-        if let w = weights["\(prefix).linear_v.weight"] {
-        }
-        if let w = weights["\(prefix).linear_out.weight"] {
-        }
-        if let w = weights["\(prefix).linear_pos.weight"] {
-        }
-
         // Load positional biases
         if let u = weights["\(prefix).pos_bias_u"] {
             eval(u)

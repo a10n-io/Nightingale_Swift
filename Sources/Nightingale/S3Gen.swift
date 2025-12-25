@@ -691,12 +691,10 @@ public class UpsampleEncoder: Module {
 // MARK: - Flow Blocks (Decoder)
 
 // Helper: Apply mask smartly - skip batch elements with all-zero masks (CFG unconditional)
-func applyMaskSmartGlobal(_ h: MLXArray, _ mask: MLXArray?, debug: Bool = false) -> MLXArray {
+func applyMaskSmartGlobal(_ h: MLXArray, _ mask: MLXArray?) -> MLXArray {
     guard let m = mask else { return h }
 
     let B = h.shape[0]
-    if debug {
-    }
     if B == 1 {
         // Single batch element - apply mask normally
         return h * m
@@ -705,23 +703,11 @@ func applyMaskSmartGlobal(_ h: MLXArray, _ mask: MLXArray?, debug: Bool = false)
         var result = h
         for b in 0..<B {
             let maskSum = m[b].sum().item(Float.self)
-            if debug {
-                eval(h[b])
-            }
             if maskSum > 0 {
                 // This batch element has a non-zero mask - apply it
                 result[b] = h[b] * m[b]
-                if debug {
-                    eval(result[b])
-                }
-            } else {
-                if debug {
-                }
             }
             // If maskSum == 0, skip masking (CFG unconditional pass)
-        }
-        if debug {
-            eval(result)
         }
         return result
     }
@@ -748,12 +734,10 @@ public class CausalBlock1D: Module {
             if CausalBlock1D.debugCalls {
                 eval(h)
                 eval(mask)
-                fflush(stdout)
             }
             h = applyMaskSmartGlobal(h, mask)
             if CausalBlock1D.debugCalls {
                 eval(h)
-                fflush(stdout)
             }
         }
 
@@ -1033,22 +1017,18 @@ public class FlowMatchingDecoder: Module {
                 let condb = cond[b]
                 eval(xb); eval(mub); eval(spkb); eval(condb)
             }
-            fflush(stdout)
-            fflush(stdout)
         }
 
         TimeMLP.debugEnabled = debug
         let tEmb = timeMLP(t)
         eval(tEmb)
         if debug {
-            fflush(stdout)
         }
 
         // spkEmb is 80-dim already (projected by caller)
         let spkExpanded = tiled(speakerEmb.expandedDimensions(axis: 2), repetitions: [1, 1, L])
 
         if debug {
-            fflush(stdout)
         }
 
         // Matches Python order: x, mu, spks, cond
@@ -1058,7 +1038,6 @@ public class FlowMatchingDecoder: Module {
             checkSpatial(mu, label: "  mu")
             checkSpatial(spkExpanded, label: "  spk_expanded")
             checkSpatial(cond, label: "  cond")
-            fflush(stdout)
         }
         var h = concatenated([x, mu, spkExpanded, cond], axis: 1) // [B, 320, T]
         if debug {
@@ -1066,17 +1045,14 @@ public class FlowMatchingDecoder: Module {
             checkSpatial(h, label: "01_concat")
             // ===== MICRO-BISECTION CHECKPOINT A: After input concatenation =====
             debugStats(h, name: "CHECKPOINT_A_input_concat")
-            fflush(stdout)
         }
 
         // Attention Mask: combines causal/non-causal pattern with padding mask
         if debug {
-            fflush(stdout)
         }
         var attnMask = makeAttentionMask(L, paddingMask: mask)
         if debug {
             eval(attnMask)
-            fflush(stdout)
         }
 
         // WORKAROUND: When mask=nil, pass nil to ALL operations to avoid MLX operator cache bug
@@ -1090,7 +1066,6 @@ public class FlowMatchingDecoder: Module {
                     let maskSum = m[b].sum().item(Float.self)
                 }
             }
-            fflush(stdout)
         }
 
         // Helper: Apply mask smartly - skip batch elements with all-zero masks (CFG unconditional)
@@ -1121,7 +1096,6 @@ public class FlowMatchingDecoder: Module {
         if useMask, let providedMask = mask {
             masks = [providedMask]
             if debug {
-                fflush(stdout)
             }
         }
 
@@ -1132,7 +1106,6 @@ public class FlowMatchingDecoder: Module {
             if let md = maskDown {
             } else {
             }
-            fflush(stdout)
             CausalResNetBlock.debugEnabled = true
             CausalBlock1D.debugCalls = true  // Enable mask debugging
         }
@@ -1298,8 +1271,7 @@ public class FlowMatchingDecoder: Module {
                 }
             }
             if useMask, let mf = maskFull {
-                if debug { }
-                let hMasked = applyMaskSmartGlobal(h, mf, debug: debug)
+                let hMasked = applyMaskSmartGlobal(h, mf)
                 h = ul(hMasked)
             } else {
                 h = ul(h)

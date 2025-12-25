@@ -841,7 +841,6 @@ public class T3Model: Module {
         self.norm = RMSNorm(dims: config.hiddenSize, eps: config.rmsNormEps)
 
         // Load final norm weight
-        fflush(stdout)
         if let normWeight = weights["norm.weight"] {
             eval(normWeight)
 
